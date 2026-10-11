@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Синтаксис JS-файлов
+        run: |
+          find . -name '*.js' -not -path './.git/*' -not -path './node_modules/*' -print0 \
+            | xargs -0 -r -n1 node --check
+
+      - name: Синтаксис встроенных скриптов в HTML
+        run: |
+          find . -name '*.html' -not -path './.git/*' -print0 | xargs -0 -r python3 .github/scripts/check_inline_js.py
+
+      - name: Корректность JSON
+        run: |
+          find . -name '*.json' -not -path './.git/*' -not -path './node_modules/*' -print0 \
+            | xargs -0 -r -n1 python3 -m json.tool > /dev/null
+
+      - name: Синтаксис Python
+        run: |
+          find . -name '*.py' -not -path './.git/*' -print0 | xargs -0 -r python3 -m py_compile
+
+      - name: Синтаксис PHP
+        run: |
+          files=$(find . -name '*.php' -not -path './.git/*')
+          if [ -n "$files" ]; then for f in $files; do php -l "$f"; done; else echo "PHP-файлов нет"; fi
+
+      - name: Поиск секретов в коде
+        run: |
+          # Публичный ключ Supabase (sb_publishable_...) разрешён: он предназначен для браузера.
+          patterns='sb_secret_|service_role"?[[:space:]]*[:=][[:space:]]*["'"'"']ey|-----BEGIN [A-Z ]*PRIVATE KEY|ghp_[A-Za-z0-9]{30,}|github_pat_|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|[0-9]{8,10}:AA[A-Za-z0-9_-]{30,}|(password|passwd|ftp_pass)[[:space:]]*[:=][[:space:]]*["'"'"'][^"'"'"'$]{4,}'
+          if git grep -nIE "$patterns" -- . ':!.github/workflows/ci.yml'; then
+            echo "::error::Похоже на секрет в коде. Уберите его и храните в GitHub Secrets или на хостинге."
+            exit 1
+          fi
+          echo "Секретов не найдено"

@@ -1,0 +1,52 @@
+name: Deploy
+
+# Публикация запускается только вручную: Actions → Deploy → Run workflow.
+# По умолчанию dry_run = true: показывает, какие файлы изменятся, ничего не загружая.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Пробный запуск: только показать изменения (true) или опубликовать (false)"
+        type: boolean
+        default: true
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Публикация на хостинг по FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USER }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          server-dir: ${{ secrets.FTP_DIR }}
+          protocol: ${{ secrets.FTP_PROTOCOL || 'ftps' }}
+          dry-run: ${{ inputs.dry_run }}
+          log-level: verbose
+          # Не публикуем: служебные файлы, исходники инструментов, документацию
+          # и всё, что живёт только на хостинге (.htaccess, SSL-проверки, настройки PHP).
+          exclude: |
+            **/.git*
+            **/.git*/**
+            .github/**
+            **/node_modules/**
+            **/*.md
+            supabase/**
+            tools/**
+            .htaccess
+            .htpasswd
+            .well-known/**
+            cgi-bin/**
+            .user.ini
+            php.ini
+            **/.env
+            **/.env.*
+            **/*.key
+            **/*.pem
