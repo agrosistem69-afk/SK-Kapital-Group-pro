@@ -585,6 +585,21 @@
                     </div>
                 </div>
 
+                <!-- Интерактивные чертежи (листы DWG, собранные сборщиком в HTML) -->
+                <div id="drawingsSection" data-roles="manager,worker,lead,pto" class="hidden bg-white rounded-xl p-5 shadow-sm border border-slate-200 mb-6 scroll-mt-20">
+                    <div class="flex items-center justify-between gap-3 mb-3">
+                        <button onclick="toggleDrawingsSection()" class="flex items-center gap-2 text-left">
+                            <i id="drawingsSectionChevron" class="fa-solid fa-chevron-down text-slate-400 text-xs transition-transform"></i>
+                            <h3 class="text-base font-bold text-slate-900">Чертежи</h3>
+                            <span id="projectDrawingsCount" class="text-xs font-semibold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">0</span>
+                        </button>
+                    </div>
+                    <div id="drawingsSectionBody">
+                        <p class="text-xs text-slate-500 mb-3">Актуальные листы проекта. Обновляются автоматически после сохранения DWG на сервере компании.</p>
+                        <div id="projectDrawingsList" class="space-y-4"></div>
+                    </div>
+                </div>
+
                 <!-- Задачи ПТО по объекту -->
                 <div id="ptoTasksSection" class="bg-white rounded-xl p-5 shadow-sm border border-slate-200 mb-6 scroll-mt-20">
                     <div class="flex items-center justify-between gap-3 mb-3">
@@ -1530,6 +1545,23 @@
     </div>
 
     <!-- MODAL: MOBILE MENU (список административных действий для маленьких экранов) -->
+    <!-- Просмотр интерактивного чертежа. Лист открывается в изолированном iframe (sandbox без
+         allow-same-origin), поэтому код страницы чертежа не имеет доступа к сессии приложения. -->
+    <div id="drawingViewerModal" class="fixed inset-0 bg-slate-900 z-[60] flex flex-col hidden">
+        <div class="flex items-center justify-between gap-3 px-4 py-2 bg-slate-900 text-white">
+            <div class="min-w-0">
+                <div id="drawingViewerTitle" class="text-sm font-semibold truncate"></div>
+                <div id="drawingViewerMeta" class="text-[11px] text-slate-400 truncate"></div>
+            </div>
+            <button onclick="closeDrawingViewer()" class="w-9 h-9 flex-shrink-0 rounded-lg hover:bg-white/10 flex items-center justify-center" title="Закрыть"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="relative flex-1 bg-white">
+            <div id="drawingViewerLoading" class="absolute inset-0 flex items-center justify-center text-sm text-slate-400">Загрузка чертежа...</div>
+            <iframe id="drawingViewerFrame" sandbox="allow-scripts" referrerpolicy="no-referrer" class="absolute inset-0 w-full h-full border-0"></iframe>
+            <div id="drawingViewerWatermark" class="absolute inset-0 pointer-events-none overflow-hidden select-none"></div>
+        </div>
+    </div>
+
     <div id="mobileMenuModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center hidden">
         <div class="bg-white rounded-t-2xl sm:rounded-xl shadow-xl max-w-md w-full overflow-hidden">
             <div class="bg-slate-900 px-5 py-4 text-white flex justify-between items-center">
@@ -1557,6 +1589,11 @@
                     <button data-roles="manager,worker,lead,pto" onclick="openProjectSection('execDocsSection')" class="hidden w-full items-center gap-4 px-5 py-4 text-left hover:bg-slate-50 transition-colors">
                         <div class="w-10 h-10 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-file-signature"></i></div>
                         <span class="text-sm font-medium text-slate-800 flex-1">Исполнительная документация</span>
+                        <i class="fa-solid fa-chevron-right text-slate-300 text-xs"></i>
+                    </button>
+                    <button data-roles="manager,worker,lead,pto" onclick="openProjectSection('drawingsSection')" class="hidden w-full items-center gap-4 px-5 py-4 text-left hover:bg-slate-50 transition-colors">
+                        <div class="w-10 h-10 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-map"></i></div>
+                        <span class="text-sm font-medium text-slate-800 flex-1">Чертежи</span>
                         <i class="fa-solid fa-chevron-right text-slate-300 text-xs"></i>
                     </button>
                     <button data-roles="manager,worker,lead,pto" onclick="openProjectSection('ptoTasksSection')" class="hidden w-full items-center gap-4 px-5 py-4 text-left hover:bg-slate-50 transition-colors">
@@ -2145,6 +2182,7 @@
             renderProjectOrders(projId);
             renderProjectInvoices(projId);
             renderProjectExecDocs(projId);
+            renderProjectDrawings(projId);
             renderProjectPtoTasks(projId);
             hideProjectExtraSections(); // при каждом заходе на объект доп. разделы снова свёрнуты с главной
         }
@@ -2173,6 +2211,7 @@
                 ordersSection: () => { if (ordersSectionCollapsed) toggleOrdersSection(); },
                 inspectionsSection: () => { if (inspectionsSectionCollapsed) toggleInspectionsSection(); },
                 execDocsSection: () => { if (execDocsSectionCollapsed) toggleExecDocsSection(); },
+                drawingsSection: () => { if (drawingsSectionCollapsed) toggleDrawingsSection(); },
                 ptoTasksSection: () => { if (ptoTasksSectionCollapsed) togglePtoTasksSection(); },
             };
             if (expandIfCollapsed[sectionId]) expandIfCollapsed[sectionId]();
@@ -5267,6 +5306,109 @@
             const { error } = await sb.from('exec_documents').delete().eq('id', docId);
             if (error) { alert('Ошибка удаления: ' + error.message); return; }
             await renderProjectExecDocs(projectId);
+        }
+
+        // -------------------- ЧЕРТЕЖИ --------------------
+        // Листы DWG превращает в HTML сборщик в офисе (скрипт tools/upload_drawings.py) и кладёт
+        // в закрытый bucket. Таблица drawings и правила доступа — supabase/drawings.sql:
+        // лист видят только руководители и участники проекта.
+        const DRAWINGS_BUCKET = 'drawings';
+        let drawingsSectionCollapsed = false;
+        let drawingViewerUrl = null;
+
+        function toggleDrawingsSection() {
+            drawingsSectionCollapsed = !drawingsSectionCollapsed;
+            document.getElementById('drawingsSectionBody').classList.toggle('hidden', drawingsSectionCollapsed);
+            document.getElementById('drawingsSectionChevron').style.transform = drawingsSectionCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
+        }
+
+        async function renderProjectDrawings(projectId) {
+            const listEl = document.getElementById('projectDrawingsList');
+            const countEl = document.getElementById('projectDrawingsCount');
+            if (!listEl || !projectId) return;
+            if (!['manager', 'worker', 'lead', 'pto'].includes(currentUserRole)) return;
+            listEl.innerHTML = '<div class="text-xs text-slate-400 py-2">Загрузка...</div>';
+
+            const { data, error } = await sb.from('drawings').select('*').eq('project_id', projectId).order('section').order('sheet');
+            if (error) {
+                listEl.innerHTML = `<div class="text-xs text-rose-500 py-2">Не удалось загрузить: ${escapeHtml(error.message)}</div>`;
+                return;
+            }
+
+            countEl.textContent = (data || []).length;
+            if (!data || data.length === 0) {
+                listEl.innerHTML = '<div class="text-xs text-slate-400 py-2">Чертежей пока нет</div>';
+                return;
+            }
+
+            const bySection = {};
+            data.forEach(d => { (bySection[d.section || 'Без раздела'] = bySection[d.section || 'Без раздела'] || []).push(d); });
+
+            listEl.innerHTML = Object.keys(bySection).map(section => `
+                <div>
+                    <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-2">${escapeHtml(section)}</div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        ${bySection[section].map(d => `
+                            <button onclick="openDrawingViewer('${d.id}')" class="flex items-center gap-3 text-left border border-slate-200 rounded-lg px-3 py-2.5 bg-slate-50 hover:bg-brand-50 hover:border-brand-200 transition-colors">
+                                <div class="w-9 h-9 rounded-lg bg-white border border-slate-200 text-brand-600 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-map"></i></div>
+                                <div class="min-w-0">
+                                    <div class="text-sm font-semibold text-slate-800 truncate">${escapeHtml(d.sheet)}</div>
+                                    <div class="text-[11px] text-slate-400 truncate">Обновлён ${formatDrawingDate(d.updated_at)}</div>
+                                </div>
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+            appData.drawings = data;
+        }
+
+        function formatDrawingDate(iso) {
+            if (!iso) return '—';
+            const d = new Date(iso);
+            return d.toLocaleDateString('ru-RU') + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        }
+
+        async function openDrawingViewer(drawingId) {
+            const d = (appData.drawings || []).find(x => x.id === drawingId);
+            if (!d) return;
+            const frame = document.getElementById('drawingViewerFrame');
+            const loading = document.getElementById('drawingViewerLoading');
+            document.getElementById('drawingViewerTitle').textContent = d.sheet;
+            document.getElementById('drawingViewerMeta').textContent = `${d.section || ''} · обновлён ${formatDrawingDate(d.updated_at)}`;
+            renderDrawingWatermark();
+            frame.removeAttribute('src');
+            loading.classList.remove('hidden');
+            loading.textContent = 'Загрузка чертежа...';
+            openModal('drawingViewerModal');
+
+            // Supabase Storage отдаёт HTML как обычный текст, поэтому скачиваем файл
+            // и показываем его через blob-адрес с правильным типом.
+            const { data: blob, error } = await sb.storage.from(DRAWINGS_BUCKET).download(d.file_path);
+            if (error || !blob) {
+                loading.textContent = 'Не удалось открыть чертёж: ' + (error ? error.message : 'файл не найден');
+                return;
+            }
+            const html = await blob.text();
+            if (drawingViewerUrl) URL.revokeObjectURL(drawingViewerUrl);
+            drawingViewerUrl = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+            frame.onload = () => loading.classList.add('hidden');
+            frame.src = drawingViewerUrl;
+        }
+
+        function closeDrawingViewer() {
+            closeModal('drawingViewerModal');
+            const frame = document.getElementById('drawingViewerFrame');
+            frame.removeAttribute('src');
+            if (drawingViewerUrl) { URL.revokeObjectURL(drawingViewerUrl); drawingViewerUrl = null; }
+        }
+
+        // Водяной знак с почтой зрителя и датой: по снимку экрана видно, чей это просмотр.
+        function renderDrawingWatermark() {
+            const label = `${(currentUserProfile && (currentUserProfile.email || currentUserProfile.full_name)) || ''} · ${new Date().toLocaleDateString('ru-RU')}`;
+            const cell = `<span style="display:inline-block;width:240px;padding:40px 0;transform:rotate(-30deg);color:rgba(15,23,42,0.08);font-size:14px;font-weight:600;white-space:nowrap">${escapeHtml(label)}</span>`;
+            document.getElementById('drawingViewerWatermark').innerHTML =
+                `<div style="position:absolute;inset:-25%;display:flex;flex-wrap:wrap;align-content:flex-start">${cell.repeat(120)}</div>`;
         }
 
         async function renderExecDocsList() {
