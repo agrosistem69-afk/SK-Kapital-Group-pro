@@ -3,8 +3,8 @@
 --
 -- Кто что может:
 --   * смотреть лист — руководитель (manager) и любой участник проекта (project_members);
---   * добавлять, менять и удалять листы — только сборщик с service_role ключом
---     (политик на запись для обычных пользователей нет, поэтому из приложения изменить нельзя).
+--   * добавлять, менять и удалять листы — сборщик с service_role ключом,
+--     а также руководитель из приложения (см. drawings_manager_upload.sql).
 
 create table if not exists public.drawings (
     id          uuid primary key default gen_random_uuid(),

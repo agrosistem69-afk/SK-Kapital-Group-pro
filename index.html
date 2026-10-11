@@ -593,9 +593,31 @@
                             <h3 class="text-base font-bold text-slate-900">Чертежи</h3>
                             <span id="projectDrawingsCount" class="text-xs font-semibold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">0</span>
                         </button>
+                        <button data-roles="manager" onclick="toggleDrawingUploadForm()" class="hidden bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-semibold items-center gap-2 shadow-sm transition-colors">
+                            <i class="fa-solid fa-upload"></i> Загрузить лист
+                        </button>
                     </div>
                     <div id="drawingsSectionBody">
                         <p class="text-xs text-slate-500 mb-3">Актуальные листы проекта. Обновляются автоматически после сохранения DWG на сервере компании.</p>
+                        <!-- Ручная загрузка готового HTML-листа руководителем (пока не настроена выгрузка с сервера) -->
+                        <form id="drawingUploadForm" onsubmit="uploadDrawingSheet(event)" class="hidden border border-slate-200 rounded-lg p-4 mb-4 bg-slate-50 space-y-3">
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <label class="block text-xs font-semibold text-slate-600">Раздел
+                                    <input id="drawingUploadSection" type="text" placeholder="Например: Озеленение" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-normal">
+                                </label>
+                                <label class="block text-xs font-semibold text-slate-600">Название листа
+                                    <input id="drawingUploadSheet" type="text" required placeholder="Например: Лист 11.1. Посадочный план" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-normal">
+                                </label>
+                            </div>
+                            <label class="block text-xs font-semibold text-slate-600">Файл листа (.html)
+                                <input id="drawingUploadFile" type="file" accept=".html,.htm,text/html" required class="mt-1 block w-full text-sm font-normal">
+                            </label>
+                            <div id="drawingUploadError" class="hidden text-xs text-rose-600"></div>
+                            <div class="flex gap-2">
+                                <button id="drawingUploadBtn" type="submit" class="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Загрузить</button>
+                                <button type="button" onclick="toggleDrawingUploadForm()" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-200">Отмена</button>
+                            </div>
+                        </form>
                         <div id="projectDrawingsList" class="space-y-4"></div>
                     </div>
                 </div>
@@ -2193,6 +2215,15 @@
         function hideProjectExtraSections() {
             const wrap = document.getElementById('projectExtraSections');
             if (wrap) wrap.classList.add('hidden');
+            showOnlyExtraSection(null);
+        }
+
+        // Из меню "Ещё" показываем только выбранный раздел, остальные доп. разделы прячем.
+        // null — вернуть все (видимость по ролям задаётся классом hidden и здесь не трогается).
+        function showOnlyExtraSection(sectionId) {
+            document.querySelectorAll('#projectExtraSections > div[id$="Section"]').forEach(el => {
+                el.style.display = (sectionId && el.id !== sectionId) ? 'none' : '';
+            });
         }
 
         function openProjectSection(sectionId) {
@@ -2205,6 +2236,7 @@
                 openProject(appData.currentProjectId);
             }
             document.getElementById('projectExtraSections').classList.remove('hidden');
+            showOnlyExtraSection(sectionId);
             // Разворачиваем нужный раздел, если он был свёрнут аккордеоном
             const expandIfCollapsed = {
                 invoicesSection: () => { if (invoicesSectionCollapsed) toggleInvoicesSection(); },
@@ -5351,16 +5383,69 @@
                         ${bySection[section].map(d => `
                             <button onclick="openDrawingViewer('${d.id}')" class="flex items-center gap-3 text-left border border-slate-200 rounded-lg px-3 py-2.5 bg-slate-50 hover:bg-brand-50 hover:border-brand-200 transition-colors">
                                 <div class="w-9 h-9 rounded-lg bg-white border border-slate-200 text-brand-600 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-map"></i></div>
-                                <div class="min-w-0">
+                                <div class="min-w-0 flex-1">
                                     <div class="text-sm font-semibold text-slate-800 truncate">${escapeHtml(d.sheet)}</div>
                                     <div class="text-[11px] text-slate-400 truncate">Обновлён ${formatDrawingDate(d.updated_at)}</div>
                                 </div>
+                                ${currentUserRole === 'manager' ? `<span role="button" title="Удалить лист" onclick="event.stopPropagation(); deleteDrawing('${d.id}')" class="text-slate-300 hover:text-rose-500 px-1"><i class="fa-solid fa-trash-can text-xs"></i></span>` : ''}
                             </button>
                         `).join('')}
                     </div>
                 </div>
             `).join('');
             appData.drawings = data;
+        }
+
+        function toggleDrawingUploadForm() {
+            const form = document.getElementById('drawingUploadForm');
+            form.classList.toggle('hidden');
+            if (!form.classList.contains('hidden')) {
+                if (drawingsSectionCollapsed) toggleDrawingsSection();
+                document.getElementById('drawingUploadError').classList.add('hidden');
+            }
+        }
+
+        // Руководитель загружает готовый HTML-лист: файл в закрытый bucket, запись в таблицу drawings.
+        async function uploadDrawingSheet(e) {
+            e.preventDefault();
+            const projectId = appData.currentProjectId;
+            const file = document.getElementById('drawingUploadFile').files[0];
+            const sheet = document.getElementById('drawingUploadSheet').value.trim();
+            const section = document.getElementById('drawingUploadSection').value.trim();
+            const errEl = document.getElementById('drawingUploadError');
+            const btn = document.getElementById('drawingUploadBtn');
+            errEl.classList.add('hidden');
+            if (!projectId || !file || !sheet) return;
+
+            btn.disabled = true;
+            btn.textContent = 'Загрузка...';
+            const filePath = `${projectId}/${crypto.randomUUID()}.html`;
+            const { error: upErr } = await sb.storage.from(DRAWINGS_BUCKET)
+                .upload(filePath, file, { contentType: 'text/html', upsert: false });
+            let error = upErr;
+            if (!error) {
+                ({ error } = await sb.from('drawings').insert({ project_id: projectId, section, sheet, file_path: filePath }));
+                if (error) await sb.storage.from(DRAWINGS_BUCKET).remove([filePath]);
+            }
+            btn.disabled = false;
+            btn.textContent = 'Загрузить';
+            if (error) {
+                errEl.textContent = 'Не удалось загрузить: ' + error.message;
+                errEl.classList.remove('hidden');
+                return;
+            }
+            document.getElementById('drawingUploadForm').reset();
+            document.getElementById('drawingUploadForm').classList.add('hidden');
+            renderProjectDrawings(projectId);
+        }
+
+        async function deleteDrawing(drawingId) {
+            const d = (appData.drawings || []).find(x => x.id === drawingId);
+            if (!d || !confirm(`Удалить лист «${d.sheet}»?`)) return;
+            const { error } = await sb.from('drawings').delete().eq('id', drawingId);
+            if (error) { alert('Не удалось удалить: ' + error.message); return; }
+            await sb.storage.from(DRAWINGS_BUCKET).remove([d.file_path]);
+            renderProjectDrawings(d.project_id);
         }
 
         function formatDrawingDate(iso) {
