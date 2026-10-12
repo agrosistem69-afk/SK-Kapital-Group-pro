@@ -1,0 +1,28 @@
+name: Telegram
+# Отправка сообщения (напоминания) в Telegram от бота компании.
+# Токен бота и номер чата лежат только в GitHub Secrets: TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID.
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: "Текст сообщения"
+        type: string
+        required: true
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Отправить сообщение в Telegram
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TEXT: ${{ inputs.message }}
+        run: |
+          if [ -z "$TOKEN" ] || [ -z "$CHAT_ID" ]; then
+            echo "::error::Не заданы секреты TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID"
+            exit 1
+          fi
+          curl -sS --fail-with-body "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            --data-urlencode "text=${TEXT}" > /dev/null
+          echo "Сообщение отправлено"
