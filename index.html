@@ -254,7 +254,10 @@
         <!-- Экран "Объёмы": проектные объёмы материалов, поставлено по документам (в т.ч. из 1С) и остаток -->
         <div id="volumesScreen" class="hidden flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-40">
             <button id="volumesBackToProject" onclick="openProject(appData.currentProjectId)" class="hidden text-sm text-brand-600 hover:text-brand-700 font-semibold mb-2"><i class="fa-solid fa-arrow-left mr-1"></i> <span></span></button>
-            <h2 class="text-xl font-bold text-slate-900 mb-1">Объёмы</h2>
+            <div class="flex items-center gap-2 mb-1">
+                <h2 class="text-xl font-bold text-slate-900">Объёмы</h2>
+                <button onclick="showHelp('volumes')" title="Подсказка: как здесь всё работает" class="w-7 h-7 rounded-full border-2 border-brand-600 text-brand-600 hover:bg-brand-50 text-sm font-bold flex items-center justify-center">?</button>
+            </div>
             <p class="text-sm text-slate-500 mb-4">По каждому материалу: сколько по проекту, сколько поставлено по документам и сколько ещё осталось.</p>
             <select id="volumesProjectFilter" onchange="renderVolumes()" class="bg-white border border-slate-300 rounded-lg text-sm px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-brand-500"></select>
             <div class="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 mb-4">
@@ -1661,6 +1664,7 @@
                 <div class="text-sm font-semibold">Объёмы по зонам</div>
                 <select id="zonesSheet" onchange="zonesLoadSheet(this.value)" class="mt-1 max-w-full bg-slate-800 text-white text-xs rounded px-2 py-1 focus:outline-none"></select>
             </div>
+            <button onclick="showHelp('zones')" title="Подсказка: как здесь всё работает" class="w-8 h-8 flex-shrink-0 rounded-full border-2 border-white/70 hover:bg-white/10 flex items-center justify-center text-sm font-bold">?</button>
             <button onclick="closeZones()" class="w-9 h-9 flex-shrink-0 rounded-lg hover:bg-white/10 flex items-center justify-center" title="Закрыть"><i class="fa-solid fa-xmark"></i></button>
         </div>
         <div class="flex-1 min-h-0 flex flex-col md:flex-row">
@@ -1676,6 +1680,17 @@
                 <div id="zonesHint" class="absolute bottom-2 left-2 max-w-[calc(100%-4rem)] w-fit bg-white/90 rounded px-2 py-1 text-xs text-slate-600 pointer-events-none"></div>
             </div>
             <div id="zonesPanel" class="md:w-[26rem] max-h-[45vh] md:max-h-none overflow-y-auto border-t md:border-t-0 md:border-l border-slate-200 p-4"></div>
+        </div>
+    </div>
+
+    <!-- Подсказки «?»: что делает каждая кнопка на экране -->
+    <div id="helpModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4 hidden" onclick="if (event.target === this) closeModal('helpModal')">
+        <div class="bg-white rounded-xl shadow-xl max-w-xl w-full overflow-hidden">
+            <div class="bg-slate-900 px-6 py-4 text-white flex justify-between items-center gap-3">
+                <h3 id="helpModalTitle" class="font-bold text-lg truncate"></h3>
+                <button onclick="closeModal('helpModal')" class="text-slate-400 hover:text-white transition-colors"><i class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+            <div id="helpModalBody" class="p-5 max-h-[75vh] overflow-y-auto custom-scrollbar text-sm text-slate-700 space-y-4"></div>
         </div>
     </div>
 
@@ -6682,6 +6697,7 @@
             }, { passive: false });
             document.addEventListener('keydown', e => {
                 if (!zonesState || document.getElementById('zonesModal').classList.contains('hidden')) return;
+                if (e.key === 'Escape' && !document.getElementById('helpModal').classList.contains('hidden')) { closeModal('helpModal'); return; }
                 if (e.key === 'Escape') { zonesState.draft ? zonesCancelDraft() : closeZones(); }
                 if (e.key === 'Enter' && zonesState.draft) zonesFinishDraft();
             });
@@ -7120,6 +7136,84 @@
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, 'Выбранные участки');
             XLSX.writeFile(wb, `Объёмы по участкам - ${st.drawing.sheet.replace(/[\\/:*?"<>|]/g, ' ')}.xlsx`);
+        }
+
+        // ---- Подсказки «?» ----
+        const helpBtnRow = (icon, name, text, who) => `
+            <div class="flex gap-3">
+                <div class="w-8 h-8 flex-shrink-0 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center"><i class="fa-solid ${icon}"></i></div>
+                <div><div class="font-semibold text-slate-900">${name}${who ? ` <span class="font-normal text-[11px] text-slate-400">${who}</span>` : ''}</div><div class="text-slate-600">${text}</div></div>
+            </div>`;
+        const helpH = t => `<h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide">${t}</h4>`;
+        const HELP = {
+            volumes: {
+                title: 'Как работают «Объёмы»',
+                html: () => `
+                    <p>Здесь по каждому материалу проекта видно три числа:</p>
+                    <ul class="space-y-1 pl-1">
+                        <li><b>По проекту</b> — сколько нужно по последней редакции чертежей.</li>
+                        <li><b>Поставлено</b> — сколько уже привезли по документам (из 1С или внесено вручную).</li>
+                        <li><b>Осталось</b> — сколько ещё нужно поставить. Если привезли больше проекта, вместо него будет красное «Сверх проекта».</li>
+                    </ul>
+                    ${helpH('Кнопки')}
+                    <div class="space-y-3">
+                        ${helpBtnRow('fa-file-import', 'Загрузить документ 1С', 'Выберите файл УПД или накладной (XML или Excel из 1С). Программа сама разнесёт строки по материалам и прибавит их к «Поставлено».', 'руководитель, бухгалтерия')}
+                        ${helpBtnRow('fa-truck', 'Поставка вручную', 'Если документа в файле нет: выберите материал, впишите количество, номер и дату документа.', 'руководитель, бухгалтерия')}
+                        ${helpBtnRow('fa-draw-polygon', 'По зонам', 'Открывает план листа. На нём можно выбрать участки нажатием или обвести зону и сразу увидеть количество материалов и площадь. В этом окне есть своя кнопка «?».', '')}
+                        ${helpBtnRow('fa-map', 'Из чертежей', 'Берёт материалы и количество из ведомостей загруженных чертежей (самая свежая редакция каждого листа). Перед сохранением показывает, что изменится. Нажимайте после загрузки новой редакции листа.', 'кто загружает чертежи')}
+                        ${helpBtnRow('fa-file-excel', 'Ведомость объёмов', 'Загрузить проектные объёмы из таблицы Excel, если их нет в чертежах.', 'кто загружает чертежи')}
+                        ${helpBtnRow('fa-plus', 'Материал', 'Добавить один материал вручную.', 'кто загружает чертежи')}
+                        ${helpBtnRow('fa-clock-rotate-left', 'История объёмов и редакций', 'Как менялся проектный объём от редакции к редакции: что добавилось, что убрали, что изменилось.', '')}
+                    </div>
+                    ${helpH('Карточки материалов')}
+                    <p>Нажмите на карточку, чтобы увидеть все поставки этого материала и историю его проектного объёма. Там же можно удалить ошибочную поставку.</p>
+                    <p>Если появилась жёлтая полоса «Строк из документов без материала», нажмите на неё и укажите, к какому материалу относится каждая строка. Программа запомнит это и в следующий раз сделает сама.</p>
+                    ${helpH('Обычный порядок работы')}
+                    <ol class="list-decimal pl-5 space-y-1">
+                        <li>Загрузили новую редакцию листа во «Чертежах», затем здесь нажали «Из чертежей» и «Обновить объёмы».</li>
+                        <li>Пришла поставка: «Загрузить документ 1С».</li>
+                        <li>Смотрите «Осталось», это и есть то, что ещё нужно заказать.</li>
+                    </ol>
+                    <p class="text-xs text-slate-400">Некоторые кнопки видны не всем: это зависит от роли в системе.</p>`,
+            },
+            zones: {
+                title: 'Как считать по плану',
+                html: () => `
+                    <p>Вверху выберите лист. Ниже два способа посчитать объёмы на плане, переключаются кнопками в левом верхнем углу.</p>
+                    ${helpH('Выбрать участки')}
+                    <ol class="list-decimal pl-5 space-y-1">
+                        <li>Нажимайте на цветники, полосы кустов, деревья, газон. Выбранное подсвечивается оранжевым.</li>
+                        <li>Справа (на телефоне снизу) складывается количество по каждому материалу, площадь и общая площадь выбранного.</li>
+                        <li>Повторное нажатие снимает выбор. Нажатие на саму выноску с цифрами выбирает все её участки.</li>
+                        <li>«Снять выбор» очищает всё.</li>
+                    </ol>
+                    ${helpH('Обвести зону')}
+                    <ol class="list-decimal pl-5 space-y-1">
+                        <li>Нажмите «Новая зона» и ставьте точки по углам нужной области. Внизу сразу видна её площадь.</li>
+                        <li>Нажмите «Готово» или на первую точку, чтобы замкнуть зону. «Убрать точку» отменяет последнюю.</li>
+                        <li>Зон может быть сколько угодно. В таблице колонка на каждую зону и «Итого». Зону можно переименовать или удалить в списке зон рядом с таблицей.</li>
+                    </ol>
+                    ${helpH('Управление планом')}
+                    <ul class="space-y-1 pl-1">
+                        <li><b>Двигать</b> — потянуть план мышью или пальцем.</li>
+                        <li><b>Приблизить</b> — колёсико мыши, два пальца или кнопки «+» и «−» справа внизу. Кнопка со стрелками показывает весь лист.</li>
+                    </ul>
+                    ${helpH('Что важно знать')}
+                    <ul class="space-y-1 pl-1">
+                        <li>Количество берётся из выносок: «28 / 256» значит позиция 28 по ведомости, 256 шт. Если после числа стоит «м²», это площадь.</li>
+                        <li>Позиции без выносок на плане (например, мульчирование) по зонам не считаются.</li>
+                        <li>«Скачать в Excel» сохраняет таблицу файлом.</li>
+                        <li>Выбранное и нарисованное сохраняется и видно на телефоне и компьютере под вашей учётной записью.</li>
+                        <li>Эти подсчёты не меняют проектные объёмы в списке, это отдельный расчёт.</li>
+                    </ul>`,
+            },
+        };
+        function showHelp(topic) {
+            const h = HELP[topic];
+            if (!h) return;
+            document.getElementById('helpModalTitle').textContent = h.title;
+            document.getElementById('helpModalBody').innerHTML = h.html();
+            openModal('helpModal');
         }
 
         async function openVolumesHistory() {
