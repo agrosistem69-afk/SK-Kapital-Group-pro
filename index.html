@@ -251,6 +251,33 @@
             <div id="allDrawingsList" class="space-y-6"></div>
         </div>
 
+        <!-- Экран "Объёмы": проектные объёмы материалов, поставлено по документам (в т.ч. из 1С) и остаток -->
+        <div id="volumesScreen" class="hidden flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-40">
+            <button id="volumesBackToProject" onclick="openProject(appData.currentProjectId)" class="hidden text-sm text-brand-600 hover:text-brand-700 font-semibold mb-2"><i class="fa-solid fa-arrow-left mr-1"></i> <span></span></button>
+            <h2 class="text-xl font-bold text-slate-900 mb-1">Объёмы</h2>
+            <p class="text-sm text-slate-500 mb-4">По каждому материалу: сколько по проекту, сколько поставлено по документам и сколько ещё осталось.</p>
+            <select id="volumesProjectFilter" onchange="renderVolumes()" class="bg-white border border-slate-300 rounded-lg text-sm px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-brand-500"></select>
+            <div class="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 mb-4">
+                <button onclick="openDeliveryImport()" class="volumes-deliveries-only hidden bg-brand-600 hover:bg-brand-700 text-white px-3 py-2 rounded-lg text-sm font-semibold items-center justify-center gap-2 shadow-sm transition-colors">
+                    <i class="fa-solid fa-file-import"></i> Загрузить документ 1С
+                </button>
+                <button onclick="openDeliveryForm()" class="volumes-deliveries-only hidden bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold items-center justify-center gap-2 transition-colors">
+                    <i class="fa-solid fa-truck"></i> Поставка вручную
+                </button>
+                <button onclick="openDesignImport()" class="drawings-admin-only hidden bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold items-center justify-center gap-2 transition-colors">
+                    <i class="fa-solid fa-file-excel"></i> Ведомость объёмов
+                </button>
+                <button onclick="openMaterialForm()" class="drawings-admin-only hidden bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold items-center justify-center gap-2 transition-colors">
+                    <i class="fa-solid fa-plus"></i> Материал
+                </button>
+            </div>
+            <input type="file" id="deliveryImportFile" accept=".xml,.xlsx,.xls,.csv" class="hidden" onchange="handleDeliveryFile(this)">
+            <input type="file" id="designImportFile" accept=".xlsx,.xls,.csv" class="hidden" onchange="handleDesignFile(this)">
+            <div id="volumesSummary" class="mb-4"></div>
+            <div id="volumesUnmatched" class="mb-4"></div>
+            <div id="volumesList" class="space-y-2"></div>
+        </div>
+
         <!-- Экран "Бухгалтерия" — единая лента накладных/УПД со всех проектов -->
         <div id="accountingScreen" class="hidden flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-40">
             <h2 class="text-xl font-bold text-slate-900 mb-1">Бухгалтерия</h2>
@@ -742,6 +769,12 @@
                         <i class="fa-solid fa-map text-lg"></i>
                     </span>
                     <span class="text-[10.5px] leading-tight font-medium text-center break-words">Чертежи</span>
+                </button>
+                <button id="navVolumesBtn" data-roles="manager,lead,pto,accountant" onclick="showVolumesScreen()" class="hidden flex-col items-center justify-center gap-1 py-2 px-0.5 hover:text-brand-600 transition-colors">
+                    <span class="nav-icon-wrap relative w-11 h-6 rounded-full flex items-center justify-center">
+                        <i class="fa-solid fa-boxes-stacked text-lg"></i>
+                    </span>
+                    <span class="text-[10.5px] leading-tight font-medium text-center break-words">Объёмы</span>
                 </button>
                 <button id="navMoreBtn" data-roles="manager,worker,lead,pto,accountant" onclick="openModal('mobileMenuModal')" class="hidden flex-col items-center justify-center gap-1 py-2 px-0.5 hover:text-brand-600 transition-colors">
                     <span class="nav-icon-wrap relative w-11 h-6 rounded-full flex items-center justify-center">
@@ -1601,6 +1634,17 @@
         </div>
     </div>
 
+    <!-- Общее окно раздела «Объёмы»: карточка материала, формы, предпросмотр загрузки -->
+    <div id="volumesModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-xl shadow-xl max-w-3xl w-full overflow-hidden">
+            <div class="bg-slate-900 px-6 py-4 text-white flex justify-between items-center gap-3">
+                <h3 id="volumesModalTitle" class="font-bold text-lg truncate"></h3>
+                <button onclick="closeModal('volumesModal')" class="text-slate-400 hover:text-white transition-colors"><i class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+            <div id="volumesModalBody" class="p-5 max-h-[75vh] overflow-y-auto custom-scrollbar"></div>
+        </div>
+    </div>
+
     <div id="mobileMenuModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center hidden">
         <div class="bg-white rounded-t-2xl sm:rounded-xl shadow-xl max-w-md w-full overflow-hidden">
             <div class="bg-slate-900 px-5 py-4 text-white flex justify-between items-center">
@@ -2221,7 +2265,7 @@
 
         function setActiveNavTab(tab) {
             // Бухгалтерия и ПТО открываются из «Ещё», поэтому подсвечиваем «Ещё».
-            const map = { projects: 'navProjectsBtn', more: 'navMoreBtn', drawings: 'navDrawingsBtn' };
+            const map = { projects: 'navProjectsBtn', more: 'navMoreBtn', drawings: 'navDrawingsBtn', volumes: 'navVolumesBtn' };
             if (tab === 'accounting' || tab === 'pto') tab = 'more';
             Object.entries(map).forEach(([key, id]) => {
                 const btn = document.getElementById(id);
@@ -2235,6 +2279,7 @@
 
         function showBoardsScreen() {
             document.getElementById('drawingsScreen').classList.add('hidden');
+            document.getElementById('volumesScreen').classList.add('hidden');
             document.getElementById('boardsScreen').classList.remove('hidden');
             document.getElementById('boardsScreen').classList.add('flex-grow');
             document.getElementById('projectView').classList.add('hidden');
@@ -2247,6 +2292,7 @@
 
         function openProject(projId) {
             document.getElementById('drawingsScreen').classList.add('hidden');
+            document.getElementById('volumesScreen').classList.add('hidden');
             switchProject(projId);
             document.getElementById('boardsScreen').classList.add('hidden');
             document.getElementById('projectView').classList.remove('hidden');
@@ -3458,6 +3504,7 @@
         // -------------------- ЭКРАН "БУХГАЛТЕРИЯ" --------------------
         async function showAccountingScreen() {
             document.getElementById('drawingsScreen').classList.add('hidden');
+            document.getElementById('volumesScreen').classList.add('hidden');
             document.getElementById('boardsScreen').classList.add('hidden');
             document.getElementById('projectView').classList.add('hidden');
             document.getElementById('accountingScreen').classList.remove('hidden');
@@ -5481,8 +5528,9 @@
         // С главного экрана — все проекты с фильтром.
         async function showDrawingsScreen() {
             const fromProject = !document.getElementById('projectView').classList.contains('hidden')
-                || (!document.getElementById('drawingsScreen').classList.contains('hidden') && drawingsScreenProjectOnly);
-            ['boardsScreen', 'projectView', 'accountingScreen', 'ptoScreen'].forEach(id => document.getElementById(id).classList.add('hidden'));
+                || (!document.getElementById('drawingsScreen').classList.contains('hidden') && drawingsScreenProjectOnly)
+                || (!document.getElementById('volumesScreen').classList.contains('hidden') && volumesScreenProjectOnly);
+            ['boardsScreen', 'projectView', 'accountingScreen', 'ptoScreen', 'volumesScreen'].forEach(id => document.getElementById(id).classList.add('hidden'));
             document.getElementById('drawingsScreen').classList.remove('hidden');
             document.getElementById('createProjectFab').classList.add('hidden');
             setActiveNavTab('drawings');
@@ -5542,6 +5590,568 @@
                         <div class="space-y-4">${renderDrawingGroups(byProject[pid])}</div>
                     </div>
                 `).join('');
+        }
+
+        // -------------------- ОБЪЁМЫ МАТЕРИАЛОВ --------------------
+        // Проектные объёмы (меняет только администратор чертежей, каждое изменение пишется в историю),
+        // поставлено — сумма строк накладных/УПД (вручную или из файлов 1С), осталось = проект − поставлено.
+        let volumesState = { projectId: null, materials: [], deliveries: [], aliases: [] };
+        let volumesScreenProjectOnly = false;
+        let pendingImport = null;
+
+        const canEditDeliveries = () => ['manager', 'accountant'].includes(currentUserRole);
+        const normName = s => String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/["«»'`]/g, '').replace(/\s+/g, ' ').trim();
+        const fmtQty = n => (Number(n) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 3 });
+        const parseQty = v => {
+            if (typeof v === 'number') return v;
+            const n = parseFloat(String(v || '').replace(/\s| /g, '').replace(',', '.'));
+            return isNaN(n) ? null : n;
+        };
+        // 05.10.2026 / 2026-10-05 / число Excel → 2026-10-05
+        function parseDocDate(v) {
+            if (v == null || v === '') return null;
+            if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0, 10);
+            if (typeof v === 'number' && v > 20000 && v < 80000) return new Date(Math.round((v - 25569) * 86400000)).toISOString().slice(0, 10);
+            const s = String(v).trim();
+            let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+            if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+            m = s.match(/(\d{1,2})\.(\d{1,2})\.(\d{2,4})/);
+            if (m) { const y = m[3].length === 2 ? '20' + m[3] : m[3]; return `${y}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`; }
+            return null;
+        }
+        const fmtDate = iso => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('ru-RU') : '';
+
+        async function showVolumesScreen() {
+            const fromProject = !document.getElementById('projectView').classList.contains('hidden')
+                || (!document.getElementById('volumesScreen').classList.contains('hidden') && volumesScreenProjectOnly)
+                || (!document.getElementById('drawingsScreen').classList.contains('hidden') && drawingsScreenProjectOnly);
+            ['boardsScreen', 'projectView', 'accountingScreen', 'ptoScreen', 'drawingsScreen'].forEach(id => document.getElementById(id).classList.add('hidden'));
+            document.getElementById('volumesScreen').classList.remove('hidden');
+            document.getElementById('createProjectFab').classList.add('hidden');
+            setActiveNavTab('volumes');
+            document.querySelectorAll('.volumes-deliveries-only').forEach(el => {
+                el.classList.toggle('hidden', !canEditDeliveries());
+                el.classList.toggle('flex', canEditDeliveries());
+            });
+
+            const sel = document.getElementById('volumesProjectFilter');
+            const prev = sel.value;
+            sel.innerHTML = appData.projects.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+            const currentProj = fromProject && appData.projects.find(p => p.id === appData.currentProjectId);
+            volumesScreenProjectOnly = !!currentProj;
+            if (currentProj) sel.value = currentProj.id;
+            else if (appData.projects.some(p => p.id === prev)) sel.value = prev;
+            else if (appData.projects.some(p => p.id === appData.currentProjectId)) sel.value = appData.currentProjectId;
+            sel.classList.toggle('hidden', !!currentProj);
+            const back = document.getElementById('volumesBackToProject');
+            back.classList.toggle('hidden', !currentProj);
+            back.querySelector('span').textContent = currentProj ? currentProj.name : '';
+            await renderVolumes();
+        }
+
+        async function loadVolumes(projectId) {
+            const [m, d, a] = await Promise.all([
+                sb.from('materials').select('*').eq('project_id', projectId).order('name'),
+                sb.from('material_deliveries').select('*').eq('project_id', projectId).order('doc_date', { ascending: false }),
+                sb.from('material_aliases').select('*').eq('project_id', projectId),
+            ]);
+            const error = m.error || d.error || a.error;
+            if (error) throw error;
+            volumesState = { projectId, materials: m.data || [], deliveries: d.data || [], aliases: a.data || [] };
+        }
+
+        function materialTotals(materialId) {
+            const delivered = volumesState.deliveries.filter(d => d.material_id === materialId).reduce((s, d) => s + Number(d.qty || 0), 0);
+            const mat = volumesState.materials.find(m => m.id === materialId);
+            const design = Number(mat?.design_qty || 0);
+            return { design, delivered, left: design - delivered };
+        }
+
+        async function renderVolumes() {
+            const listEl = document.getElementById('volumesList');
+            const summaryEl = document.getElementById('volumesSummary');
+            const unmatchedEl = document.getElementById('volumesUnmatched');
+            const projectId = document.getElementById('volumesProjectFilter').value;
+            summaryEl.innerHTML = ''; unmatchedEl.innerHTML = '';
+            if (!projectId) { listEl.innerHTML = '<div class="text-sm text-slate-400 py-2">Нет доступных проектов</div>'; return; }
+            listEl.innerHTML = '<div class="text-xs text-slate-400 py-2">Загрузка...</div>';
+            try { await loadVolumes(projectId); }
+            catch (e) { listEl.innerHTML = `<div class="text-xs text-rose-500 py-2">Не удалось загрузить: ${escapeHtml(e.message)}</div>`; return; }
+
+            const { materials, deliveries } = volumesState;
+            const latestRev = materials.reduce((acc, m) => (m.revision_date && (!acc || m.revision_date > acc)) ? m.revision_date : acc, null);
+            const done = materials.filter(m => { const t = materialTotals(m.id); return t.design > 0 && t.left <= 0; }).length;
+            summaryEl.innerHTML = materials.length ? `
+                <div class="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap gap-x-6 gap-y-2 items-center text-sm">
+                    <div><span class="text-slate-500">Материалов:</span> <b>${materials.length}</b></div>
+                    <div><span class="text-slate-500">Поставлено полностью:</span> <b>${done}</b></div>
+                    <div class="text-xs">${latestRev ? drawingRevisionBadge(latestRev) : '<span class="text-slate-400">Дата редакции объёмов не указана</span>'}</div>
+                </div>` : '';
+
+            const unmatched = deliveries.filter(d => !d.material_id);
+            if (unmatched.length) {
+                unmatchedEl.innerHTML = `
+                    <button onclick="openUnmatchedDeliveries()" class="w-full text-left bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800 flex items-center gap-3">
+                        <i class="fa-solid fa-triangle-exclamation"></i>
+                        <span class="flex-1">Строк из документов без материала: <b>${unmatched.length}</b>. Они не входят в «Поставлено», пока не указать, к какому материалу они относятся.</span>
+                        <i class="fa-solid fa-chevron-right text-xs"></i>
+                    </button>`;
+            }
+
+            if (!materials.length) {
+                listEl.innerHTML = `<div class="bg-white rounded-xl border border-slate-200 p-5 text-sm text-slate-500">Проектных объёмов пока нет.${canManageDrawings ? ' Нажмите «Ведомость объёмов» (Excel) или «Материал», чтобы добавить.' : ''}</div>`;
+                return;
+            }
+            listEl.innerHTML = materials.map(m => {
+                const t = materialTotals(m.id);
+                const pct = t.design > 0 ? Math.min(100, Math.round(t.delivered / t.design * 100)) : 0;
+                const over = t.left < 0;
+                const leftColor = over ? 'text-rose-600' : t.left === 0 && t.design > 0 ? 'text-emerald-600' : 'text-slate-900';
+                return `
+                <button onclick="openMaterialDetails('${m.id}')" class="w-full text-left bg-white rounded-xl border border-slate-200 hover:border-brand-200 p-4 transition-colors">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0">
+                            <div class="font-semibold text-slate-900">${escapeHtml(m.name)}</div>
+                            <div class="mt-0.5">${drawingRevisionBadge(m.revision_date, true)}</div>
+                        </div>
+                        <span class="text-xs text-slate-400 flex-shrink-0">${escapeHtml(m.unit)}</span>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 mt-3 text-center">
+                        <div class="bg-slate-50 rounded-lg py-2"><div class="text-[11px] text-slate-500">По проекту</div><div class="font-bold text-slate-900">${fmtQty(t.design)}</div></div>
+                        <div class="bg-slate-50 rounded-lg py-2"><div class="text-[11px] text-slate-500">Поставлено</div><div class="font-bold text-slate-900">${fmtQty(t.delivered)}</div></div>
+                        <div class="bg-slate-50 rounded-lg py-2"><div class="text-[11px] text-slate-500">${over ? 'Сверх проекта' : 'Осталось'}</div><div class="font-bold ${leftColor}">${fmtQty(Math.abs(t.left))}</div></div>
+                    </div>
+                    <div class="h-1.5 bg-slate-100 rounded-full mt-3 overflow-hidden"><div class="h-full ${over ? 'bg-rose-500' : 'bg-emerald-500'}" style="width:${over ? 100 : pct}%"></div></div>
+                </button>`;
+            }).join('');
+        }
+
+        function showVolumesModal(title, html) {
+            document.getElementById('volumesModalTitle').textContent = title;
+            document.getElementById('volumesModalBody').innerHTML = html;
+            openModal('volumesModal');
+        }
+        const inputCls = 'w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500';
+        const materialOptions = (selected) => '<option value="">— не относится ни к одному материалу —</option>' +
+            volumesState.materials.map(m => `<option value="${m.id}" ${m.id === selected ? 'selected' : ''}>${escapeHtml(m.name)} (${escapeHtml(m.unit)})</option>`).join('');
+
+        async function openMaterialDetails(materialId) {
+            const m = volumesState.materials.find(x => x.id === materialId);
+            if (!m) return;
+            const t = materialTotals(m.id);
+            const { data: log } = await sb.from('material_design_log').select('*').eq('material_id', m.id).order('changed_at', { ascending: false });
+            const dels = volumesState.deliveries.filter(d => d.material_id === m.id);
+            const canDel = canEditDeliveries();
+            showVolumesModal(m.name, `
+                <div class="grid grid-cols-3 gap-2 text-center mb-4">
+                    <div class="bg-slate-50 rounded-lg py-2"><div class="text-[11px] text-slate-500">По проекту</div><div class="font-bold">${fmtQty(t.design)} ${escapeHtml(m.unit)}</div></div>
+                    <div class="bg-slate-50 rounded-lg py-2"><div class="text-[11px] text-slate-500">Поставлено</div><div class="font-bold">${fmtQty(t.delivered)}</div></div>
+                    <div class="bg-slate-50 rounded-lg py-2"><div class="text-[11px] text-slate-500">${t.left < 0 ? 'Сверх проекта' : 'Осталось'}</div><div class="font-bold ${t.left < 0 ? 'text-rose-600' : ''}">${fmtQty(Math.abs(t.left))}</div></div>
+                </div>
+                ${canManageDrawings ? `<div class="flex gap-2 mb-4"><button onclick="openMaterialForm('${m.id}')" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2 rounded-lg"><i class="fa-solid fa-pen mr-1"></i>Изменить проектный объём</button>
+                    <button onclick="deleteMaterial('${m.id}')" class="text-sm text-rose-600 hover:text-rose-700 px-3"><i class="fa-solid fa-trash-can mr-1"></i>Удалить материал</button></div>` : ''}
+                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Поставки</h4>
+                <div class="border border-slate-200 rounded-lg divide-y divide-slate-100 mb-5">
+                    ${dels.length ? dels.map(d => `
+                        <div class="px-3 py-2 text-sm flex items-center gap-3">
+                            <div class="flex-1 min-w-0">
+                                <div class="font-medium text-slate-800">${fmtQty(d.qty)} ${escapeHtml(d.unit || m.unit)}</div>
+                                <div class="text-[11px] text-slate-500 truncate">${escapeHtml([d.doc_number ? '№ ' + d.doc_number : '', fmtDate(d.doc_date), d.supplier].filter(Boolean).join(' · ') || 'без документа')}${d.source !== 'manual' ? ' · из 1С' : ''}</div>
+                                ${normName(d.item_name) !== normName(m.name) ? `<div class="text-[11px] text-slate-400 truncate">В документе: ${escapeHtml(d.item_name)}</div>` : ''}
+                            </div>
+                            ${canDel ? `<button onclick="deleteDelivery('${d.id}', '${m.id}')" title="Удалить строку" class="text-slate-300 hover:text-rose-500"><i class="fa-solid fa-trash-can text-xs"></i></button>` : ''}
+                        </div>`).join('') : '<div class="px-3 py-2 text-sm text-slate-400">Поставок пока нет</div>'}
+                </div>
+                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">История проектного объёма</h4>
+                <div class="border border-slate-200 rounded-lg divide-y divide-slate-100">
+                    ${(log || []).map(l => `
+                        <div class="px-3 py-2 text-sm">
+                            <div>${l.old_qty == null ? 'Добавлен: ' : `${fmtQty(l.old_qty)} → `}<b>${fmtQty(l.new_qty)}</b> ${escapeHtml(m.unit)}</div>
+                            <div class="text-[11px] text-slate-500">${l.revision_date ? 'Редакция от ' + fmtDate(l.revision_date) + ' · ' : ''}изменено ${new Date(l.changed_at).toLocaleDateString('ru-RU')}${l.source ? ' · ' + escapeHtml(l.source) : ''}</div>
+                        </div>`).join('') || '<div class="px-3 py-2 text-sm text-slate-400">Нет записей</div>'}
+                </div>`);
+        }
+
+        function openMaterialForm(materialId) {
+            const m = volumesState.materials.find(x => x.id === materialId) || {};
+            showVolumesModal(materialId ? 'Изменить проектный объём' : 'Новый материал', `
+                <form onsubmit="saveMaterial(event, '${materialId || ''}')" class="space-y-3">
+                    <div><label class="block text-xs font-bold text-slate-600 mb-1">Наименование *</label><input id="matName" required class="${inputCls}" value="${escapeHtml(m.name || '')}"></div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block text-xs font-bold text-slate-600 mb-1">Количество по проекту *</label><input id="matQty" required inputmode="decimal" class="${inputCls}" value="${m.design_qty != null ? m.design_qty : ''}"></div>
+                        <div><label class="block text-xs font-bold text-slate-600 mb-1">Ед. изм. *</label><input id="matUnit" required class="${inputCls}" value="${escapeHtml(m.unit || 'шт')}"></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block text-xs font-bold text-slate-600 mb-1">Дата редакции проекта *</label><input id="matRev" type="date" required class="${inputCls}" value="${m.revision_date || new Date().toISOString().slice(0, 10)}"></div>
+                        <div><label class="block text-xs font-bold text-slate-600 mb-1">Лист / раздел</label><input id="matSource" class="${inputCls}" value="${escapeHtml(m.source || '')}" placeholder="напр. 11.1"></div>
+                    </div>
+                    <div id="matError" class="hidden text-sm text-rose-600"></div>
+                    <div class="flex justify-end"><button type="submit" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-5 py-2 rounded-lg">Сохранить</button></div>
+                </form>`);
+        }
+
+        async function saveMaterial(e, materialId) {
+            e.preventDefault();
+            const qty = parseQty(document.getElementById('matQty').value);
+            const errEl = document.getElementById('matError');
+            if (qty == null) { errEl.textContent = 'Количество должно быть числом'; errEl.classList.remove('hidden'); return; }
+            const row = {
+                project_id: volumesState.projectId,
+                name: document.getElementById('matName').value.trim(),
+                unit: document.getElementById('matUnit').value.trim(),
+                design_qty: qty,
+                revision_date: document.getElementById('matRev').value,
+                source: document.getElementById('matSource').value.trim() || null,
+            };
+            const { error } = materialId
+                ? await sb.from('materials').update(row).eq('id', materialId)
+                : await sb.from('materials').insert(row);
+            if (error) { errEl.textContent = error.message; errEl.classList.remove('hidden'); return; }
+            closeModal('volumesModal');
+            await renderVolumes();
+        }
+
+        async function deleteMaterial(materialId) {
+            const m = volumesState.materials.find(x => x.id === materialId);
+            if (!m || !confirm(`Удалить материал «${m.name}»? Поставки по нему останутся, но станут «без материала».`)) return;
+            const { error } = await sb.from('materials').delete().eq('id', materialId);
+            if (error) { alert(error.message); return; }
+            closeModal('volumesModal');
+            await renderVolumes();
+        }
+
+        async function deleteDelivery(deliveryId, materialId) {
+            if (!confirm('Удалить эту строку поставки?')) return;
+            const { error } = await sb.from('material_deliveries').delete().eq('id', deliveryId);
+            if (error) { alert(error.message); return; }
+            await renderVolumes();
+            if (materialId) openMaterialDetails(materialId); else openUnmatchedDeliveries();
+        }
+
+        function openDeliveryForm() {
+            showVolumesModal('Поставка вручную', `
+                <form onsubmit="saveManualDelivery(event)" class="space-y-3">
+                    <div><label class="block text-xs font-bold text-slate-600 mb-1">Материал *</label><select id="delMat" required class="${inputCls}">${volumesState.materials.map(m => `<option value="${m.id}">${escapeHtml(m.name)} (${escapeHtml(m.unit)})</option>`).join('')}</select></div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block text-xs font-bold text-slate-600 mb-1">Количество *</label><input id="delQty" required inputmode="decimal" class="${inputCls}"></div>
+                        <div><label class="block text-xs font-bold text-slate-600 mb-1">Дата документа</label><input id="delDate" type="date" class="${inputCls}" value="${new Date().toISOString().slice(0, 10)}"></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block text-xs font-bold text-slate-600 mb-1">№ документа</label><input id="delNum" class="${inputCls}"></div>
+                        <div><label class="block text-xs font-bold text-slate-600 mb-1">Поставщик</label><input id="delSupplier" class="${inputCls}"></div>
+                    </div>
+                    <div id="delError" class="hidden text-sm text-rose-600"></div>
+                    <div class="flex justify-end"><button type="submit" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-5 py-2 rounded-lg">Сохранить</button></div>
+                </form>`);
+            if (!volumesState.materials.length) document.getElementById('delError').textContent = 'Сначала нужны проектные объёмы: материалов пока нет.', document.getElementById('delError').classList.remove('hidden');
+        }
+
+        async function saveManualDelivery(e) {
+            e.preventDefault();
+            const errEl = document.getElementById('delError');
+            const qty = parseQty(document.getElementById('delQty').value);
+            const mat = volumesState.materials.find(m => m.id === document.getElementById('delMat').value);
+            if (!mat || qty == null) { errEl.textContent = 'Выберите материал и укажите количество числом'; errEl.classList.remove('hidden'); return; }
+            const { error } = await sb.from('material_deliveries').insert({
+                project_id: volumesState.projectId, material_id: mat.id, item_name: mat.name, unit: mat.unit, qty,
+                doc_number: document.getElementById('delNum').value.trim() || null,
+                doc_date: document.getElementById('delDate').value || null,
+                supplier: document.getElementById('delSupplier').value.trim() || null,
+                source: 'manual',
+            });
+            if (error) { errEl.textContent = error.message; errEl.classList.remove('hidden'); return; }
+            closeModal('volumesModal');
+            await renderVolumes();
+        }
+
+        // ---- Чтение файлов ----
+        let xlsxLoading = null;
+        function loadXlsxLib() {
+            if (window.XLSX) return Promise.resolve();
+            if (!xlsxLoading) xlsxLoading = new Promise((resolve, reject) => {
+                const sc = document.createElement('script');
+                sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+                sc.onload = resolve; sc.onerror = () => { xlsxLoading = null; reject(new Error('Не удалось загрузить модуль чтения Excel. Проверьте интернет.')); };
+                document.head.appendChild(sc);
+            });
+            return xlsxLoading;
+        }
+
+        // Таблица из Excel/CSV: ищем строку заголовков (наименование + количество) в первых 40 строках.
+        async function readSheetRows(file) {
+            await loadXlsxLib();
+            const buf = await file.arrayBuffer();
+            let wb;
+            if (/\.csv$/i.test(file.name)) {
+                const bytes = new Uint8Array(buf);
+                let text = new TextDecoder('utf-8').decode(bytes);
+                if (text.includes('�')) text = new TextDecoder('windows-1251').decode(bytes);
+                wb = XLSX.read(text, { type: 'string', raw: false });
+            } else {
+                wb = XLSX.read(buf, { type: 'array', cellDates: true });
+            }
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            return XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true });
+        }
+
+        function findColumns(rows) {
+            const test = (cell, re) => re.test(normName(cell));
+            for (let r = 0; r < Math.min(rows.length, 40); r++) {
+                const row = rows[r];
+                const name = row.findIndex(c => test(c, /наименован|номенклатур|товар|материал/));
+                const qty = row.findIndex(c => test(c, /^кол|количеств|объем|объём/));
+                if (name >= 0 && qty >= 0) {
+                    return {
+                        header: r, name, qty,
+                        unit: row.findIndex(c => test(c, /^ед|единиц/)),
+                        source: row.findIndex(c => test(c, /^лист|раздел/)),
+                        docNum: row.findIndex(c => test(c, /номер док|№ док|номер накладн|номер упд/)),
+                        docDate: row.findIndex(c => test(c, /дата/)),
+                        supplier: row.findIndex(c => test(c, /поставщик|контрагент|продавец/)),
+                    };
+                }
+            }
+            return null;
+        }
+
+        // Поиск номера и даты документа в шапке печатной формы 1С («Счёт-фактура № 123 от 05.10.2026»).
+        function findDocHeader(rows) {
+            for (const row of rows.slice(0, 40)) {
+                const line = row.join(' ');
+                const m = line.match(/(?:№|N)\s*([\wА-Яа-я\-\/]+)\s+от\s+(\d{1,2}[.\s]\d{1,2}[.\s]\d{2,4}|\d{1,2}\s+[а-я]+\s+\d{4})/i);
+                if (m) return { number: m[1], date: parseDocDate(m[2]) || parseRuLongDate(m[2]) };
+            }
+            return { number: '', date: null };
+        }
+        function parseRuLongDate(s) {
+            const months = ['январ', 'феврал', 'март', 'апрел', 'ма', 'июн', 'июл', 'август', 'сентябр', 'октябр', 'ноябр', 'декабр'];
+            const m = String(s).toLowerCase().match(/(\d{1,2})\s+([а-я]+)\s+(\d{4})/);
+            if (!m) return null;
+            const idx = months.findIndex(p => m[2].startsWith(p));
+            return idx < 0 ? null : `${m[3]}-${String(idx + 1).padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+        }
+
+        // УПД / счёт-фактура / ТОРГ-12 в формате ФНС (XML из 1С или ЭДО). Кодировка обычно windows-1251.
+        const OKEI = { '796': 'шт', '006': 'м', '055': 'м²', '113': 'м³', '166': 'кг', '168': 'т', '112': 'л', '839': 'компл', '778': 'упак', '018': 'пог. м' };
+        async function readUpdXml(file) {
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            const head = new TextDecoder('ascii').decode(bytes.slice(0, 200));
+            const enc = (head.match(/encoding=["']([\w-]+)["']/i) || [])[1] || 'utf-8';
+            const text = new TextDecoder(enc.toLowerCase()).decode(bytes);
+            const doc = new DOMParser().parseFromString(text, 'application/xml');
+            if (doc.querySelector('parsererror')) throw new Error('Файл XML повреждён или это не документ 1С');
+            const all = [...doc.getElementsByTagName('*')];
+            const attr = (el, names) => { for (const n of names) { const v = el.getAttribute(n); if (v) return v; } return ''; };
+            const docEl = all.find(el => el.hasAttribute('НомерСчФ') || el.hasAttribute('НомерДок') || el.hasAttribute('НомДок'));
+            const number = docEl ? attr(docEl, ['НомерСчФ', 'НомерДок', 'НомДок']) : '';
+            const date = docEl ? parseDocDate(attr(docEl, ['ДатаСчФ', 'ДатаДок', 'ДатаСост'])) : null;
+            const sellerEl = all.find(el => /^(СвПрод|Продавец|ГрузОт|Поставщик)$/.test(el.localName));
+            let supplier = '';
+            if (sellerEl) {
+                const org = [...sellerEl.getElementsByTagName('*')].find(el => el.hasAttribute('НаимОрг'));
+                const fio = [...sellerEl.getElementsByTagName('*')].find(el => el.localName === 'ФИО');
+                supplier = org ? org.getAttribute('НаимОрг') : fio ? ['Фамилия', 'Имя', 'Отчество'].map(a => fio.getAttribute(a) || '').join(' ').trim() : '';
+            }
+            const lines = all.filter(el => el.hasAttribute('НаимТов')).map(el => {
+                const qtyChild = [...el.children].find(c => /^Кол/.test(c.localName));
+                return {
+                    item_name: el.getAttribute('НаимТов'),
+                    qty: parseQty(attr(el, ['КолТов', 'Кол', 'КолВо']) || qtyChild?.textContent),
+                    unit: attr(el, ['НаимЕдИзм']) || OKEI[attr(el, ['ОКЕИ_Тов', 'ОКЕИ'])] || '',
+                };
+            }).filter(l => l.item_name && l.qty != null);
+            if (!lines.length) throw new Error('В файле не нашлось строк с товарами (НаимТов / КолТов)');
+            return { number, date, supplier, lines, source: '1c-xml' };
+        }
+
+        async function readDeliveryExcel(file) {
+            const rows = await readSheetRows(file);
+            const cols = findColumns(rows);
+            if (!cols) throw new Error('Не нашёл в таблице колонки «Наименование» и «Количество»');
+            const header = findDocHeader(rows);
+            const lines = [];
+            for (const row of rows.slice(cols.header + 1)) {
+                const name = String(row[cols.name] || '').trim();
+                const qty = parseQty(row[cols.qty]);
+                if (!name || qty == null || /^итого|^всего/i.test(name)) continue;
+                lines.push({
+                    item_name: name, qty,
+                    unit: cols.unit >= 0 ? String(row[cols.unit] || '').trim() : '',
+                    doc_number: cols.docNum >= 0 ? String(row[cols.docNum] || '').trim() : '',
+                    doc_date: cols.docDate >= 0 ? parseDocDate(row[cols.docDate]) : null,
+                    supplier: cols.supplier >= 0 ? String(row[cols.supplier] || '').trim() : '',
+                });
+            }
+            if (!lines.length) throw new Error('В таблице нет строк с количеством');
+            return { number: header.number, date: header.date, supplier: '', lines, source: '1c-excel' };
+        }
+
+        function guessMaterial(itemName) {
+            const n = normName(itemName);
+            const alias = volumesState.aliases.find(a => a.alias === n);
+            if (alias) return alias.material_id;
+            const exact = volumesState.materials.find(m => normName(m.name) === n);
+            if (exact) return exact.id;
+            const contains = volumesState.materials.filter(m => n.includes(normName(m.name)) || normName(m.name).includes(n));
+            return contains.length === 1 ? contains[0].id : '';
+        }
+
+        function openDeliveryImport() {
+            if (!volumesState.projectId) return;
+            document.getElementById('deliveryImportFile').value = '';
+            document.getElementById('deliveryImportFile').click();
+        }
+
+        async function handleDeliveryFile(input) {
+            const file = input.files[0];
+            if (!file) return;
+            let parsed;
+            try { parsed = /\.xml$/i.test(file.name) ? await readUpdXml(file) : await readDeliveryExcel(file); }
+            catch (e) { alert('Не получилось прочитать файл: ' + e.message); return; }
+            parsed.lines.forEach(l => { l.material_id = guessMaterial(l.item_name); });
+            pendingImport = parsed;
+            const perLineDocs = parsed.lines.some(l => l.doc_number || l.doc_date);
+            showVolumesModal('Проверка документа: ' + file.name, `
+                <p class="text-sm text-slate-500 mb-3">Проверьте, к какому материалу относится каждая строка. Строки «без материала» сохранятся, их можно будет указать позже.</p>
+                ${perLineDocs ? '' : `
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                    <div><label class="block text-xs font-bold text-slate-600 mb-1">№ документа</label><input id="impNum" class="${inputCls}" value="${escapeHtml(parsed.number || '')}"></div>
+                    <div><label class="block text-xs font-bold text-slate-600 mb-1">Дата</label><input id="impDate" type="date" class="${inputCls}" value="${parsed.date || ''}"></div>
+                    <div><label class="block text-xs font-bold text-slate-600 mb-1">Поставщик</label><input id="impSupplier" class="${inputCls}" value="${escapeHtml(parsed.supplier || '')}"></div>
+                </div>`}
+                <div class="border border-slate-200 rounded-lg divide-y divide-slate-100 mb-3">
+                    ${parsed.lines.map((l, i) => `
+                        <div class="px-3 py-2">
+                            <div class="flex justify-between gap-3 text-sm"><span class="text-slate-800">${escapeHtml(l.item_name)}</span><b class="flex-shrink-0">${fmtQty(l.qty)} ${escapeHtml(l.unit)}</b></div>
+                            ${perLineDocs ? `<div class="text-[11px] text-slate-500">${escapeHtml([l.doc_number ? '№ ' + l.doc_number : '', fmtDate(l.doc_date), l.supplier].filter(Boolean).join(' · '))}</div>` : ''}
+                            <select data-import-line="${i}" class="mt-1 ${inputCls}">${materialOptions(l.material_id)}</select>
+                        </div>`).join('')}
+                </div>
+                <div id="impError" class="hidden text-sm text-rose-600 mb-2"></div>
+                <div class="flex justify-end"><button onclick="saveDeliveryImport()" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-5 py-2 rounded-lg">Сохранить строки (${parsed.lines.length})</button></div>`);
+        }
+
+        async function saveDeliveryImport() {
+            if (!pendingImport) return;
+            const errEl = document.getElementById('impError');
+            const num = document.getElementById('impNum')?.value.trim() || '';
+            const date = document.getElementById('impDate')?.value || null;
+            const supplier = document.getElementById('impSupplier')?.value.trim() || '';
+            const rows = pendingImport.lines.map((l, i) => ({
+                project_id: volumesState.projectId,
+                material_id: document.querySelector(`[data-import-line="${i}"]`).value || null,
+                item_name: l.item_name, unit: l.unit || null, qty: l.qty,
+                doc_number: l.doc_number || num || null,
+                doc_date: l.doc_date || date || null,
+                supplier: l.supplier || supplier || null,
+                source: pendingImport.source,
+            }));
+            const dup = rows.find(r => r.doc_number && volumesState.deliveries.some(d => d.doc_number === r.doc_number && d.doc_date === r.doc_date));
+            if (dup && !confirm(`Документ № ${dup.doc_number} от ${fmtDate(dup.doc_date)} уже загружался. Загрузить ещё раз? Количество тогда посчитается дважды.`)) return;
+            const { error } = await sb.from('material_deliveries').insert(rows);
+            if (error) { errEl.textContent = error.message; errEl.classList.remove('hidden'); return; }
+            await rememberAliases(rows);
+            pendingImport = null;
+            closeModal('volumesModal');
+            await renderVolumes();
+        }
+
+        // Запоминаем «название в документе → материал», чтобы в следующий раз подставилось само.
+        async function rememberAliases(rows) {
+            const aliases = [];
+            rows.forEach(r => {
+                const mat = r.material_id && volumesState.materials.find(m => m.id === r.material_id);
+                if (mat && normName(r.item_name) !== normName(mat.name)) aliases.push({ project_id: r.project_id, alias: normName(r.item_name), material_id: mat.id });
+            });
+            if (aliases.length) await sb.from('material_aliases').upsert(aliases, { onConflict: 'project_id,alias' });
+        }
+
+        function openUnmatchedDeliveries() {
+            const list = volumesState.deliveries.filter(d => !d.material_id);
+            const canEdit = canEditDeliveries();
+            showVolumesModal('Строки без материала', `
+                <p class="text-sm text-slate-500 mb-3">Укажите, к какому материалу относится строка. Программа запомнит выбор для следующих документов.</p>
+                <div class="border border-slate-200 rounded-lg divide-y divide-slate-100">
+                    ${list.map(d => `
+                        <div class="px-3 py-2">
+                            <div class="flex justify-between gap-3 text-sm"><span>${escapeHtml(d.item_name)}</span><b class="flex-shrink-0">${fmtQty(d.qty)} ${escapeHtml(d.unit || '')}</b></div>
+                            <div class="text-[11px] text-slate-500">${escapeHtml([d.doc_number ? '№ ' + d.doc_number : '', fmtDate(d.doc_date), d.supplier].filter(Boolean).join(' · '))}</div>
+                            ${canEdit ? `<div class="flex gap-2 mt-1"><select onchange="assignDelivery('${d.id}', this.value)" class="${inputCls}">${materialOptions('')}</select>
+                                <button onclick="deleteDelivery('${d.id}')" title="Удалить строку" class="text-slate-300 hover:text-rose-500 px-2"><i class="fa-solid fa-trash-can text-xs"></i></button></div>` : ''}
+                        </div>`).join('') || '<div class="px-3 py-2 text-sm text-slate-400">Все строки сопоставлены</div>'}
+                </div>`);
+        }
+
+        async function assignDelivery(deliveryId, materialId) {
+            if (!materialId) return;
+            const d = volumesState.deliveries.find(x => x.id === deliveryId);
+            const { error } = await sb.from('material_deliveries').update({ material_id: materialId }).eq('id', deliveryId);
+            if (error) { alert(error.message); return; }
+            await rememberAliases([{ ...d, material_id: materialId }]);
+            await renderVolumes();
+            openUnmatchedDeliveries();
+        }
+
+        // ---- Ведомость проектных объёмов из Excel (только администратор чертежей) ----
+        function openDesignImport() {
+            if (!volumesState.projectId) return;
+            document.getElementById('designImportFile').value = '';
+            document.getElementById('designImportFile').click();
+        }
+
+        async function handleDesignFile(input) {
+            const file = input.files[0];
+            if (!file) return;
+            let rows, cols;
+            try { rows = await readSheetRows(file); cols = findColumns(rows); }
+            catch (e) { alert('Не получилось прочитать файл: ' + e.message); return; }
+            if (!cols) { alert('Не нашёл в таблице колонки «Наименование» и «Количество»'); return; }
+            const items = [];
+            for (const row of rows.slice(cols.header + 1)) {
+                const name = String(row[cols.name] || '').trim();
+                const qty = parseQty(row[cols.qty]);
+                if (!name || qty == null || /^итого|^всего/i.test(name)) continue;
+                const existing = volumesState.materials.find(m => normName(m.name) === normName(name));
+                const prevItem = items.find(it => normName(it.name) === normName(name));
+                if (prevItem) { prevItem.qty += qty; continue; }  // одинаковые позиции из разных листов складываем
+                items.push({ name, qty, unit: cols.unit >= 0 ? String(row[cols.unit] || '').trim() : '', source: cols.source >= 0 ? String(row[cols.source] || '').trim() : '', existing });
+            }
+            if (!items.length) { alert('В таблице нет строк с количеством'); return; }
+            pendingImport = { design: items };
+            const changed = items.filter(it => it.existing && Number(it.existing.design_qty) !== it.qty).length;
+            const added = items.filter(it => !it.existing).length;
+            showVolumesModal('Ведомость объёмов: ' + file.name, `
+                <p class="text-sm text-slate-500 mb-3">Новых материалов: <b>${added}</b>, изменится объём: <b>${changed}</b>. Материалы, которых нет в файле, останутся как есть.</p>
+                <div class="mb-4 max-w-xs"><label class="block text-xs font-bold text-slate-600 mb-1">Дата редакции проекта *</label><input id="designRev" type="date" class="${inputCls}" value="${new Date().toISOString().slice(0, 10)}"></div>
+                <div class="border border-slate-200 rounded-lg divide-y divide-slate-100 mb-3">
+                    ${items.map(it => {
+                        const was = it.existing ? Number(it.existing.design_qty) : null;
+                        const tag = was == null ? '<span class="text-[11px] text-emerald-600 font-semibold">новый</span>'
+                            : was !== it.qty ? `<span class="text-[11px] text-amber-600 font-semibold">было ${fmtQty(was)}</span>` : '<span class="text-[11px] text-slate-400">без изменений</span>';
+                        return `<div class="px-3 py-2 flex justify-between gap-3 text-sm"><span>${escapeHtml(it.name)}</span><span class="flex-shrink-0 text-right"><b>${fmtQty(it.qty)} ${escapeHtml(it.unit || it.existing?.unit || 'шт')}</b><br>${tag}</span></div>`;
+                    }).join('')}
+                </div>
+                <div id="designError" class="hidden text-sm text-rose-600 mb-2"></div>
+                <div class="flex justify-end"><button onclick="saveDesignImport()" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-5 py-2 rounded-lg">Сохранить</button></div>`);
+        }
+
+        async function saveDesignImport() {
+            const items = pendingImport?.design;
+            if (!items) return;
+            const errEl = document.getElementById('designError');
+            const rev = document.getElementById('designRev').value;
+            if (!rev) { errEl.textContent = 'Укажите дату редакции проекта'; errEl.classList.remove('hidden'); return; }
+            for (const it of items) {
+                const row = { project_id: volumesState.projectId, name: it.name, design_qty: it.qty, revision_date: rev, source: it.source || null };
+                if (it.unit) row.unit = it.unit;
+                const { error } = it.existing
+                    ? (Number(it.existing.design_qty) === it.qty && it.existing.revision_date === rev ? { error: null } : await sb.from('materials').update(row).eq('id', it.existing.id))
+                    : await sb.from('materials').insert(row);
+                if (error) { errEl.textContent = `${it.name}: ${error.message}`; errEl.classList.remove('hidden'); await renderVolumes(); return; }
+            }
+            pendingImport = null;
+            closeModal('volumesModal');
+            await renderVolumes();
         }
 
         // Загружать, править и удалять листы может только тот, кто записан в drawing_admins
@@ -6087,6 +6697,7 @@
 
         async function showPtoScreen() {
             document.getElementById('drawingsScreen').classList.add('hidden');
+            document.getElementById('volumesScreen').classList.add('hidden');
             document.getElementById('boardsScreen').classList.add('hidden');
             document.getElementById('projectView').classList.add('hidden');
             document.getElementById('accountingScreen').classList.add('hidden');
