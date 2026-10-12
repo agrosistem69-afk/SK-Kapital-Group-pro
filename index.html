@@ -264,6 +264,9 @@
                 <button onclick="openDeliveryForm()" class="volumes-deliveries-only hidden bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold items-center justify-center gap-2 transition-colors">
                     <i class="fa-solid fa-truck"></i> Поставка вручную
                 </button>
+                <button onclick="openZonesCounter()" class="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-colors">
+                    <i class="fa-solid fa-draw-polygon"></i> По зонам
+                </button>
                 <button onclick="importVolumesFromDrawings()" class="drawings-admin-only hidden bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold items-center justify-center gap-2 transition-colors">
                     <i class="fa-solid fa-map"></i> Из чертежей
                 </button>
@@ -1635,6 +1638,37 @@
             <div id="drawingViewerLoading" class="absolute inset-0 flex items-center justify-center text-sm text-slate-400">Загрузка чертежа...</div>
             <iframe id="drawingViewerFrame" sandbox="allow-scripts" referrerpolicy="no-referrer" class="absolute inset-0 w-full h-full border-0"></iframe>
             <div id="drawingViewerWatermark" class="absolute inset-0 pointer-events-none overflow-hidden select-none"></div>
+        </div>
+    </div>
+
+    <!-- Объёмы по зонам: план листа, на котором пользователь обводит участки -->
+    <style>
+        #zonesSvg .st[stroke], #zonesSvg .ln { fill: none; stroke-width: .6px; vector-effect: non-scaling-stroke; }
+        #zonesSvg .ld .ln { stroke-width: .7px; }
+        #zonesSvg .hb { fill: #fff; fill-opacity: .75; stroke: none; }
+        #zonesSvg { cursor: grab; }
+    </style>
+    <div id="zonesModal" class="fixed inset-0 bg-white z-[60] flex flex-col hidden">
+        <div class="flex items-center gap-3 px-4 py-2 bg-slate-900 text-white">
+            <div class="min-w-0 flex-1">
+                <div class="text-sm font-semibold">Объёмы по зонам</div>
+                <select id="zonesSheet" onchange="zonesLoadSheet(this.value)" class="mt-1 max-w-full bg-slate-800 text-white text-xs rounded px-2 py-1 focus:outline-none"></select>
+            </div>
+            <button onclick="closeZones()" class="w-9 h-9 flex-shrink-0 rounded-lg hover:bg-white/10 flex items-center justify-center" title="Закрыть"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="flex-1 min-h-0 flex flex-col md:flex-row">
+            <div class="relative flex-1 min-h-[45vh] overflow-hidden bg-white">
+                <svg id="zonesSvg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" class="absolute inset-0 w-full h-full touch-none select-none"><g id="zonesPlan"></g><g id="zonesOverlay"></g></svg>
+                <div id="zonesLoading" class="absolute inset-0 flex items-center justify-center text-sm text-slate-400 bg-white px-6 text-center"></div>
+                <div id="zonesToolbar" class="absolute top-2 left-2 right-2 flex flex-wrap gap-2 pointer-events-none"></div>
+                <div class="absolute bottom-2 right-2 flex flex-col gap-1">
+                    <button onclick="zonesZoomButton(1 / 1.5)" title="Приблизить" class="w-9 h-9 bg-white border border-slate-300 rounded-lg shadow-sm text-slate-700"><i class="fa-solid fa-plus"></i></button>
+                    <button onclick="zonesZoomButton(1.5)" title="Отдалить" class="w-9 h-9 bg-white border border-slate-300 rounded-lg shadow-sm text-slate-700"><i class="fa-solid fa-minus"></i></button>
+                    <button onclick="zonesFit()" title="Весь лист" class="w-9 h-9 bg-white border border-slate-300 rounded-lg shadow-sm text-slate-700"><i class="fa-solid fa-expand"></i></button>
+                </div>
+                <div id="zonesHint" class="absolute bottom-2 left-2 max-w-[calc(100%-4rem)] w-fit bg-white/90 rounded px-2 py-1 text-xs text-slate-600 pointer-events-none"></div>
+            </div>
+            <div id="zonesPanel" class="md:w-[26rem] max-h-[45vh] md:max-h-none overflow-y-auto border-t md:border-t-0 md:border-l border-slate-200 p-4"></div>
         </div>
     </div>
 
@@ -6186,12 +6220,15 @@
             const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
             return await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
         }
-        // → { hasFrame, outside: { позиция: количество за рамкой } } или null, если в листе нет плана.
-        async function drawingFrameExclusions(html) {
+        // План листа: { svg (содержимое плана), viewBox, frames (синие рамки), callouts: [{ pos, qty, pts }] } или null.
+        // pts — острия стрелок выноски (или центр подписи, если стрелок нет).
+        async function parsePlanData(html) {
             const planz = html.match(/PLANZ\s*=\s*"([^"]+)"/);
             if (!planz || !('DecompressionStream' in window)) return null;
             let svg;
             try { svg = await gunzipBase64(planz[1]); } catch (e) { return null; }
+            const vbAttr = (html.match(/<svg\b[^>]*\bid="plan"[^>]*>/) || [''])[0].match(/viewBox="([^"]+)"/);
+            const viewBox = vbAttr ? vbAttr[1].trim().split(/[\s,]+/).map(Number) : null;
             const frames = [];
             for (const m of svg.matchAll(/<path\b([^>]*)>/g)) {
                 const a = m[1];
@@ -6203,10 +6240,9 @@
                     if (poly.length > 3 && Math.hypot(f[0] - l[0], f[1] - l[1]) < 0.5) frames.push(poly);
                 });
             }
-            if (!frames.length) return { hasFrame: false, outside: {} };
             let tips = {};
             try { tips = JSON.parse((html.match(/const TIPS\s*=\s*(\{[\s\S]*?\});/) || [])[1] || '{}'); } catch (e) { /* без остриёв считаем по подписи */ }
-            const outside = {};
+            const callouts = [];
             for (const m of svg.matchAll(/<g class="it ld"([^>]*)>([\s\S]*?)<\/g>/g)) {
                 const a = m[1], body = m[2];
                 const pos = (a.match(/data-p="([^"]*)"/) || [])[1];
@@ -6221,18 +6257,26 @@
                     const hb = body.match(/<rect class="hb" x="([-\d.]+)" y="([-\d.]+)" width="([\d.]+)" height="([\d.]+)"/);
                     if (hb) pts = [[+hb[1] + hb[3] / 2, +hb[2] + hb[4] / 2]];
                 }
-                if (!pts.length) continue;
-                const outShare = pts.filter(pt => !frames.some(f => pointInPoly(pt, f))).length / pts.length;
-                if (outShare > 0) outside[pos] = (outside[pos] || 0) + qty * outShare;
+                if (pts.length) callouts.push({ pos, qty, pts });
             }
+            return { svg, viewBox: viewBox && viewBox.length === 4 && viewBox.every(Number.isFinite) ? viewBox : null, frames, callouts };
+        }
+
+        // → { hasFrame, outside: { позиция: количество за рамкой } } или null, если в листе нет плана.
+        async function drawingFrameExclusions(html) {
+            const plan = await parsePlanData(html);
+            if (!plan) return null;
+            if (!plan.frames.length) return { hasFrame: false, outside: {} };
+            const outside = {};
+            plan.callouts.forEach(c => {
+                const outShare = c.pts.filter(pt => !plan.frames.some(f => pointInPoly(pt, f))).length / c.pts.length;
+                if (outShare > 0) outside[c.pos] = (outside[c.pos] || 0) + c.qty * outShare;
+            });
             return { hasFrame: true, outside };
         }
 
-        // Ведомости из самой свежей редакции каждого листа. Если один и тот же файл загружен несколько раз
-        // под разными названиями, берём его один раз (по одинаковой ведомости), остальные — в skipped.
-        async function collectDrawingQuantities(projectId) {
-            const { data: drawings, error } = await sb.from('drawings').select('*').eq('project_id', projectId);
-            if (error) throw error;
+        // Самая свежая редакция каждого листа, новые сверху.
+        function latestDrawingsBySheet(drawings) {
             const latest = {};
             (drawings || []).forEach(d => {
                 const key = normName(d.sheet);
@@ -6241,7 +6285,15 @@
                     || ((d.revision_date || '') === (cur.revision_date || '') && d.updated_at > cur.updated_at);
                 if (newer) latest[key] = d;
             });
-            const ordered = Object.values(latest).sort((x, y) => (y.revision_date || '').localeCompare(x.revision_date || '') || (y.updated_at || '').localeCompare(x.updated_at || ''));
+            return Object.values(latest).sort((x, y) => (y.revision_date || '').localeCompare(x.revision_date || '') || (y.updated_at || '').localeCompare(x.updated_at || ''));
+        }
+
+        // Ведомости из самой свежей редакции каждого листа. Если один и тот же файл загружен несколько раз
+        // под разными названиями, берём его один раз (по одинаковой ведомости), остальные — в skipped.
+        async function collectDrawingQuantities(projectId) {
+            const { data: drawings, error } = await sb.from('drawings').select('*').eq('project_id', projectId);
+            if (error) throw error;
+            const ordered = latestDrawingsBySheet(drawings);
             const sheets = [], skipped = [], seen = new Set();
             for (const d of ordered) {
                 const { data: blob, error: dlErr } = await sb.storage.from(DRAWINGS_BUCKET).download(d.file_path);
@@ -6416,6 +6468,370 @@
         let volumesHistory = null;
         const revKey = d => d || 'без даты';
         const revLabel = d => d ? `Проект от ${fmtDate(d)}` : 'Без даты редакции';
+
+        // ---- Объёмы по зонам: пользователь обводит участки на плане, считаем позиции внутри и сумму ----
+        // Объём берётся по выноскам: если остриё стрелки выноски внутри зоны, её количество идёт в зону.
+        // Зоны хранятся в этом браузере отдельно для каждого листа проекта.
+        const ZONE_COLORS = ['#2563eb', '#16a34a', '#ea580c', '#9333ea', '#db2777', '#0891b2', '#ca8a04', '#dc2626'];
+        let zonesState = null, zonesPointerReady = false;
+
+        function sanitizePlanSvg(inner) {
+            const doc = new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg">${inner}</svg>`, 'image/svg+xml');
+            if (doc.querySelector('parsererror')) return null;
+            const allowed = new Set(['g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon']);
+            const clean = el => [...el.children].forEach(ch => {
+                if (!allowed.has(ch.localName)) { ch.remove(); return; }
+                [...ch.attributes].forEach(a => { if (/^on/i.test(a.name) || /href$/i.test(a.name) || (a.name === 'style' && /url\s*\(/i.test(a.value))) ch.removeAttribute(a.name); });
+                clean(ch);
+            });
+            clean(doc.documentElement);
+            return doc.documentElement;
+        }
+
+        const zonesStorageKey = () => `skkg-zones:${zonesState.projectId}:${normName(zonesState.drawing?.sheet)}`;
+        function zonesSave() {
+            try { localStorage.setItem(zonesStorageKey(), JSON.stringify(zonesState.zones)); } catch (e) { /* без сохранения */ }
+        }
+        function zonesLoadSaved() {
+            try { const z = JSON.parse(localStorage.getItem(zonesStorageKey()) || '[]'); return Array.isArray(z) ? z.filter(x => Array.isArray(x.pts) && x.pts.length > 2) : []; }
+            catch (e) { return []; }
+        }
+
+        async function openZonesCounter() {
+            const projectId = volumesState.projectId;
+            if (!projectId) { alert('Сначала выберите проект.'); return; }
+            if (!zonesPointerReady) { initZonesPointer(); zonesPointerReady = true; }
+            zonesState = { projectId, drawings: [], drawing: null, plan: null, rows: [], zones: [], draft: null, vb: null, baseVb: null, selected: -1 };
+            openModal('zonesModal');
+            document.getElementById('zonesPanel').innerHTML = '';
+            zonesSetLoading('Загружаю список листов...');
+            const { data, error } = await sb.from('drawings').select('*').eq('project_id', projectId);
+            if (error) { zonesSetLoading('Не удалось загрузить чертежи: ' + error.message); return; }
+            zonesState.drawings = latestDrawingsBySheet(data);
+            const sel = document.getElementById('zonesSheet');
+            sel.innerHTML = zonesState.drawings.map(d => `<option value="${d.id}">${escapeHtml(d.sheet)}</option>`).join('');
+            if (!zonesState.drawings.length) { zonesSetLoading('В этом проекте ещё нет чертежей.'); return; }
+            await zonesLoadSheet(zonesState.drawings[0].id);
+        }
+
+        function closeZones() {
+            closeModal('zonesModal');
+            document.getElementById('zonesPlan').replaceChildren();
+            document.getElementById('zonesOverlay').replaceChildren();
+            zonesState = null;
+        }
+
+        function zonesSetLoading(text) {
+            const el = document.getElementById('zonesLoading');
+            el.textContent = text || '';
+            el.classList.toggle('hidden', !text);
+        }
+
+        async function zonesLoadSheet(drawingId) {
+            const st = zonesState;
+            const d = st.drawings.find(x => x.id === drawingId);
+            if (!d) return;
+            st.drawing = d; st.plan = null; st.draft = null; st.selected = -1;
+            document.getElementById('zonesPlan').replaceChildren();
+            document.getElementById('zonesOverlay').replaceChildren();
+            document.getElementById('zonesPanel').innerHTML = '';
+            zonesSetLoading('Открываю лист...');
+            const { data: blob, error } = await sb.storage.from(DRAWINGS_BUCKET).download(d.file_path);
+            if (zonesState !== st || st.drawing !== d) return;
+            if (error || !blob) { zonesSetLoading('Не удалось открыть лист: ' + (error ? error.message : 'файл не найден')); return; }
+            const html = await blob.text();
+            const plan = await parsePlanData(html);
+            if (zonesState !== st || st.drawing !== d) return;
+            if (!plan) { zonesSetLoading('В этом листе нет плана, на котором можно выделить зоны.'); return; }
+            const root = sanitizePlanSvg(plan.svg);
+            if (!root) { zonesSetLoading('Не удалось прочитать план этого листа.'); return; }
+            const g = document.getElementById('zonesPlan');
+            g.replaceChildren(...[...root.childNodes].map(n => document.importNode(n, true)));
+            st.plan = plan;
+            st.rows = extractDrawingQuantities(html);
+            if (plan.viewBox) st.baseVb = plan.viewBox.slice();
+            else { const b = g.getBBox(); st.baseVb = [b.x, b.y, b.width, b.height]; }
+            st.vb = st.baseVb.slice();
+            st.zones = zonesLoadSaved();
+            zonesSetLoading('');
+            zonesApplyViewBox();
+            zonesRender();
+        }
+
+        function zonesApplyViewBox() {
+            const v = zonesState.vb;
+            document.getElementById('zonesSvg').setAttribute('viewBox', v.join(' '));
+            zonesRenderOverlay();
+        }
+        // Сколько единиц чертежа в одном пикселе экрана.
+        function zonesUnitsPerPx() {
+            const svg = document.getElementById('zonesSvg');
+            const v = zonesState.vb;
+            return Math.max(v[2] / (svg.clientWidth || 1), v[3] / (svg.clientHeight || 1));
+        }
+        function zonesToPlan(clientX, clientY) {
+            const svg = document.getElementById('zonesSvg');
+            const pt = svg.createSVGPoint();
+            pt.x = clientX; pt.y = clientY;
+            const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+            return [Math.round(p.x * 100) / 100, Math.round(p.y * 100) / 100];
+        }
+        function zonesZoomAt([px, py], factor, base) {
+            const st = zonesState, b = base || st.vb;
+            const w = Math.min(st.baseVb[2] * 3, Math.max(st.baseVb[2] / 300, b[2] * factor));
+            const f = w / b[2];
+            st.vb = [px - (px - b[0]) * f, py - (py - b[1]) * f, b[2] * f, b[3] * f];
+            zonesApplyViewBox();
+        }
+        function zonesZoomButton(factor) {
+            if (!zonesState?.vb) return;
+            const v = zonesState.vb;
+            zonesZoomAt([v[0] + v[2] / 2, v[1] + v[3] / 2], factor);
+        }
+        function zonesFit() {
+            if (!zonesState?.baseVb) return;
+            zonesState.vb = zonesState.baseVb.slice();
+            zonesApplyViewBox();
+        }
+
+        // Мышь и пальцы: тянуть — двигать план, колесо или два пальца — масштаб, касание без сдвига — точка зоны.
+        function initZonesPointer() {
+            const svg = document.getElementById('zonesSvg');
+            const pointers = new Map();
+            let gesture = null;
+            svg.addEventListener('pointerdown', e => {
+                if (!zonesState?.vb) return;
+                svg.setPointerCapture(e.pointerId);
+                pointers.set(e.pointerId, [e.clientX, e.clientY]);
+                if (pointers.size === 1) gesture = { type: 'pan', start: [e.clientX, e.clientY], vb: zonesState.vb.slice(), moved: false };
+                else if (pointers.size === 2) {
+                    const [a, b] = [...pointers.values()];
+                    gesture = { type: 'pinch', dist: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, vb: zonesState.vb.slice(), center: zonesToPlan((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) };
+                }
+            });
+            svg.addEventListener('pointermove', e => {
+                if (!gesture || !pointers.has(e.pointerId)) return;
+                pointers.set(e.pointerId, [e.clientX, e.clientY]);
+                if (gesture.type === 'pan') {
+                    const dx = e.clientX - gesture.start[0], dy = e.clientY - gesture.start[1];
+                    if (!gesture.moved && Math.hypot(dx, dy) < 5) return;
+                    gesture.moved = true;
+                    const k = Math.max(gesture.vb[2] / (svg.clientWidth || 1), gesture.vb[3] / (svg.clientHeight || 1));
+                    zonesState.vb = [gesture.vb[0] - dx * k, gesture.vb[1] - dy * k, gesture.vb[2], gesture.vb[3]];
+                    zonesApplyViewBox();
+                } else if (gesture.type === 'pinch' && pointers.size === 2) {
+                    const [a, b] = [...pointers.values()];
+                    zonesZoomAt(gesture.center, gesture.dist / (Math.hypot(a[0] - b[0], a[1] - b[1]) || 1), gesture.vb);
+                }
+            });
+            const up = e => {
+                if (!pointers.has(e.pointerId)) return;
+                if (gesture?.type === 'pan' && !gesture.moved && pointers.size === 1 && e.type === 'pointerup') zonesClick(e);
+                pointers.delete(e.pointerId);
+                if (pointers.size === 0) gesture = null;
+                else if (gesture?.type === 'pinch') gesture = { type: 'pan', start: [...pointers.values()][0], vb: zonesState.vb.slice(), moved: true };
+            };
+            svg.addEventListener('pointerup', up);
+            svg.addEventListener('pointercancel', up);
+            svg.addEventListener('wheel', e => {
+                if (!zonesState?.vb) return;
+                e.preventDefault();
+                zonesZoomAt(zonesToPlan(e.clientX, e.clientY), e.deltaY > 0 ? 1.2 : 1 / 1.2);
+            }, { passive: false });
+            document.addEventListener('keydown', e => {
+                if (!zonesState || document.getElementById('zonesModal').classList.contains('hidden')) return;
+                if (e.key === 'Escape') { zonesState.draft ? zonesCancelDraft() : closeZones(); }
+                if (e.key === 'Enter' && zonesState.draft) zonesFinishDraft();
+            });
+        }
+
+        function zonesClick(e) {
+            const st = zonesState;
+            if (!st.draft) {
+                // Касание внутри зоны — выделить её в списке.
+                const p = zonesToPlan(e.clientX, e.clientY);
+                let hit = -1;
+                st.zones.forEach((z, i) => { if (pointInPoly(p, z.pts)) hit = i; });
+                st.selected = hit === st.selected ? -1 : hit;
+                zonesRender();
+                return;
+            }
+            const p = zonesToPlan(e.clientX, e.clientY);
+            if (st.draft.length >= 3) {
+                const k = zonesUnitsPerPx(), f = st.draft[0];
+                if (Math.hypot(p[0] - f[0], p[1] - f[1]) / k < 14) { zonesFinishDraft(); return; }
+            }
+            st.draft.push(p);
+            zonesRenderOverlay();
+            zonesRenderToolbar();
+        }
+
+        function zonesStartDraft() { if (!zonesState?.plan) return; zonesState.draft = []; zonesState.selected = -1; zonesRender(); }
+        function zonesUndoPoint() { if (zonesState?.draft?.length) { zonesState.draft.pop(); zonesRenderOverlay(); zonesRenderToolbar(); } }
+        function zonesCancelDraft() { if (!zonesState) return; zonesState.draft = null; zonesRender(); }
+        function zonesFinishDraft() {
+            const st = zonesState;
+            if (!st?.draft || st.draft.length < 3) return;
+            const used = new Set(st.zones.map(z => z.color));
+            const color = ZONE_COLORS.find(c => !used.has(c)) || ZONE_COLORS[st.zones.length % ZONE_COLORS.length];
+            let n = st.zones.length + 1;
+            while (st.zones.some(z => z.name === `Зона ${n}`)) n++;
+            st.zones.push({ name: `Зона ${n}`, color, pts: st.draft });
+            st.draft = null;
+            st.selected = st.zones.length - 1;
+            zonesSave();
+            zonesRender();
+        }
+        function zonesRename(i, name) { if (!zonesState.zones[i]) return; zonesState.zones[i].name = name.trim() || `Зона ${i + 1}`; zonesSave(); zonesRender(); }
+        function zonesDelete(i) {
+            const z = zonesState.zones[i];
+            if (!z || !confirm(`Удалить «${z.name}»?`)) return;
+            zonesState.zones.splice(i, 1);
+            zonesState.selected = -1;
+            zonesSave();
+            zonesRender();
+        }
+        function zonesClearAll() {
+            if (!zonesState.zones.length || !confirm('Удалить все зоны на этом листе?')) return;
+            zonesState.zones = []; zonesState.selected = -1;
+            zonesSave();
+            zonesRender();
+        }
+
+        function zonesRender() {
+            zonesRenderOverlay();
+            zonesRenderToolbar();
+            zonesRenderPanel();
+        }
+
+        function zonesRenderToolbar() {
+            const st = zonesState, el = document.getElementById('zonesToolbar');
+            const btn = 'pointer-events-auto px-3 py-2 rounded-lg text-sm font-semibold shadow-sm';
+            if (!st?.plan) { el.innerHTML = ''; return; }
+            if (!st.draft) {
+                el.innerHTML = `<button onclick="zonesStartDraft()" class="${btn} bg-brand-600 hover:bg-brand-700 text-white"><i class="fa-solid fa-draw-polygon mr-1"></i>Новая зона</button>`;
+                document.getElementById('zonesHint').textContent = st.zones.length ? 'Нажмите на зону на плане, чтобы выделить её в списке' : 'Нажмите «Новая зона» и обведите участок по точкам';
+                return;
+            }
+            el.innerHTML = `
+                <button onclick="zonesFinishDraft()" ${st.draft.length < 3 ? 'disabled' : ''} class="${btn} bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-40"><i class="fa-solid fa-check mr-1"></i>Готово</button>
+                <button onclick="zonesUndoPoint()" ${st.draft.length ? '' : 'disabled'} class="${btn} bg-white border border-slate-300 text-slate-700 disabled:opacity-40"><i class="fa-solid fa-rotate-left mr-1"></i>Убрать точку</button>
+                <button onclick="zonesCancelDraft()" class="${btn} bg-white border border-slate-300 text-slate-700">Отмена</button>`;
+            document.getElementById('zonesHint').textContent = st.draft.length < 3
+                ? 'Ставьте точки по углам участка. Двигать план можно, потянув его'
+                : 'Нажмите «Готово» или на первую точку, чтобы замкнуть зону';
+        }
+
+        function zonesRenderOverlay() {
+            const st = zonesState, layer = document.getElementById('zonesOverlay');
+            if (!st?.plan || !st.vb) { layer.innerHTML = ''; return; }
+            const k = zonesUnitsPerPx();
+            const pts = p => p.map(([x, y]) => `${x},${y}`).join(' ');
+            let out = '';
+            // Острия выносок: цветом зоны, если попали в неё, серым — если нет.
+            st.plan.callouts.forEach(c => c.pts.forEach(pt => {
+                const zi = st.zones.findIndex(z => pointInPoly(pt, z.pts));
+                out += `<circle cx="${pt[0]}" cy="${pt[1]}" r="${k * (zi >= 0 ? 3 : 2)}" fill="${zi >= 0 ? st.zones[zi].color : '#94a3b8'}" fill-opacity="${zi >= 0 ? 1 : 0.7}"/>`;
+            }));
+            st.zones.forEach((z, i) => {
+                const sel = i === st.selected;
+                out += `<polygon points="${pts(z.pts)}" fill="${z.color}" fill-opacity="${sel ? 0.25 : 0.12}" stroke="${z.color}" stroke-width="${sel ? 3 : 2}" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>`;
+                const cx = z.pts.reduce((s, p) => s + p[0], 0) / z.pts.length, cy = z.pts.reduce((s, p) => s + p[1], 0) / z.pts.length;
+                out += `<text x="${cx}" y="${cy}" font-size="${k * 13}" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="${z.color}" stroke="#fff" stroke-width="${k * 3}" paint-order="stroke">${escapeHtml(z.name)}</text>`;
+            });
+            if (st.draft?.length) {
+                out += `<polyline points="${pts(st.draft)}" fill="#f59e0b" fill-opacity="0.12" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6 4" vector-effect="non-scaling-stroke"/>`;
+                st.draft.forEach((p, i) => { out += `<circle cx="${p[0]}" cy="${p[1]}" r="${k * (i === 0 ? 7 : 4)}" fill="${i === 0 ? '#fff' : '#f59e0b'}" stroke="#f59e0b" stroke-width="2" vector-effect="non-scaling-stroke"/>`; });
+            }
+            layer.innerHTML = out;
+        }
+
+        // По каждой позиции: количество в каждой зоне и общее (место, где зоны пересекаются, — один раз).
+        function zonesCompute() {
+            const st = zonesState;
+            const perZone = st.zones.map(() => ({})), total = {};
+            st.plan.callouts.forEach(c => {
+                const inside = c.pts.map(pt => st.zones.map(z => pointInPoly(pt, z.pts)));
+                st.zones.forEach((z, i) => {
+                    const share = inside.filter(r => r[i]).length / c.pts.length;
+                    if (share) perZone[i][c.pos] = (perZone[i][c.pos] || 0) + c.qty * share;
+                });
+                const any = inside.filter(r => r.some(Boolean)).length / c.pts.length;
+                if (any) total[c.pos] = (total[c.pos] || 0) + c.qty * any;
+            });
+            const byPos = {};
+            st.rows.forEach(r => { if (r.pos && !byPos[r.pos]) byPos[r.pos] = r; });
+            const order = st.rows.map(r => r.pos).filter((p, i, a) => p && a.indexOf(p) === i);
+            Object.keys(total).forEach(p => { if (!order.includes(p)) order.push(p); });
+            const rows = order.filter(p => total[p] > 0).map(p => {
+                const r = byPos[p] || { name: `Позиция ${p}`, unit: '' };
+                return { pos: p, name: r.name, unit: r.unit, zones: perZone.map(z => roundQty(z[p] || 0, r.unit)), total: roundQty(total[p], r.unit) };
+            });
+            const overlap = rows.some(r => r.zones.reduce((s, q) => s + q, 0) > r.total + 1e-6);
+            const withCallouts = new Set(st.plan.callouts.map(c => c.pos));
+            const unmarked = st.rows.filter(r => r.pos && !withCallouts.has(r.pos));
+            return { rows, overlap, unmarked };
+        }
+
+        function zonesRenderPanel() {
+            const st = zonesState, panel = document.getElementById('zonesPanel');
+            if (!st?.plan) { panel.innerHTML = ''; return; }
+            const zonesHtml = st.zones.length ? st.zones.map((z, i) => `
+                <div class="flex items-center gap-2 py-1.5 ${i === st.selected ? 'bg-slate-50 -mx-2 px-2 rounded-lg' : ''}">
+                    <span class="w-3 h-3 rounded-full flex-shrink-0" style="background:${z.color}"></span>
+                    <input value="${escapeHtml(z.name)}" onchange="zonesRename(${i}, this.value)" class="flex-1 min-w-0 px-2 py-1 border border-slate-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                    <button onclick="zonesDelete(${i})" title="Удалить зону" class="w-8 h-8 flex-shrink-0 text-slate-400 hover:text-rose-600"><i class="fa-solid fa-trash-can text-xs"></i></button>
+                </div>`).join('') : '<div class="text-sm text-slate-400">Зон пока нет. Нажмите «Новая зона» и обведите участок на плане.</div>';
+            let resultHtml = '';
+            if (st.zones.length) {
+                const res = zonesCompute();
+                resultHtml = res.rows.length ? `
+                    <div class="overflow-x-auto -mx-4 px-4">
+                        <table class="w-full text-sm">
+                            <thead><tr class="text-[11px] text-slate-500 text-left border-b border-slate-200">
+                                <th class="py-1.5 pr-2 font-medium">Материал</th>
+                                ${st.zones.map(z => `<th class="py-1.5 px-2 font-medium text-right whitespace-nowrap"><span class="inline-block w-2 h-2 rounded-full mr-1" style="background:${z.color}"></span>${escapeHtml(z.name)}</th>`).join('')}
+                                ${st.zones.length > 1 ? '<th class="py-1.5 pl-2 font-semibold text-right text-slate-700">Итого</th>' : ''}
+                            </tr></thead>
+                            <tbody class="divide-y divide-slate-100">${res.rows.map(r => `
+                                <tr>
+                                    <td class="py-1.5 pr-2 text-slate-800"><span class="text-slate-400">${escapeHtml(r.pos)}.</span> ${escapeHtml(r.name)} <span class="text-slate-400 whitespace-nowrap">${escapeHtml(r.unit)}</span></td>
+                                    ${r.zones.map(q => `<td class="py-1.5 px-2 text-right whitespace-nowrap ${q ? '' : 'text-slate-300'}">${q ? fmtQty(q) : '—'}</td>`).join('')}
+                                    ${st.zones.length > 1 ? `<td class="py-1.5 pl-2 text-right font-semibold whitespace-nowrap">${fmtQty(r.total)}</td>` : ''}
+                                </tr>`).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    ${res.overlap ? '<div class="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mt-3">Некоторые зоны пересекаются. В «Итого» общий участок посчитан один раз.</div>' : ''}
+                    <button onclick="zonesExportExcel()" class="mt-3 w-full bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold"><i class="fa-solid fa-file-excel mr-1"></i>Скачать в Excel</button>`
+                    : '<div class="text-sm text-slate-400">В выделенных зонах нет выносок с количеством.</div>';
+                if (res.unmarked.length) resultHtml += `<div class="text-xs text-slate-500 mt-3">Без выносок на плане, поэтому по зонам не считаются: ${res.unmarked.map(r => escapeHtml(r.name)).join(', ')}.</div>`;
+            }
+            panel.innerHTML = `
+                <div class="flex items-center justify-between mb-1">
+                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide">Зоны</h4>
+                    ${st.zones.length ? '<button onclick="zonesClearAll()" class="text-xs text-rose-600 hover:text-rose-700">Удалить все</button>' : ''}
+                </div>
+                <div class="mb-4">${zonesHtml}</div>
+                ${st.zones.length ? `<h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Объёмы в зонах</h4>${resultHtml}` : ''}
+                <div class="text-[11px] text-slate-400 mt-4">Количество берётся по выноскам: если стрелка выноски указывает внутрь зоны, её количество попадает в зону. Точки на плане — концы стрелок.</div>`;
+        }
+
+        async function zonesExportExcel() {
+            const st = zonesState;
+            if (!st?.zones.length) return;
+            try { await loadXlsxLib(); } catch (e) { alert(e.message); return; }
+            const res = zonesCompute();
+            const multi = st.zones.length > 1;
+            const aoa = [[st.drawing.sheet], [],
+                ['Поз.', 'Материал', 'Ед.', ...st.zones.map(z => z.name), ...(multi ? ['Итого'] : [])],
+                ...res.rows.map(r => [r.pos, r.name, r.unit, ...r.zones, ...(multi ? [r.total] : [])])];
+            const ws = XLSX.utils.aoa_to_sheet(aoa);
+            ws['!cols'] = [{ wch: 6 }, { wch: 50 }, { wch: 6 }, ...st.zones.map(() => ({ wch: 12 })), { wch: 12 }];
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Объёмы по зонам');
+            XLSX.writeFile(wb, `Объёмы по зонам - ${st.drawing.sheet.replace(/[\\/:*?"<>|]/g, ' ')}.xlsx`);
+        }
 
         async function openVolumesHistory() {
             const projectId = volumesState.projectId;
