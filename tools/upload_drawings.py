@@ -10,7 +10,8 @@
 
 manifest.json — список собранных листов:
     [{"project_id": "<uuid проекта в SKKG Pro>", "section": "Озеленение",
-      "sheet": "11.1 Сводный посадочный план", "html": "out/1197-04_11-1.html"}]
+      "sheet": "11.1 Сводный посадочный план", "html": "out/1197-04_11-1.html",
+      "revision_date": "2026-10-05"}]   # дата редакции DWG, необязательно
 
 Лист загружается заново, только если HTML изменился (сравнение по SHA-256).
 """
@@ -60,6 +61,8 @@ def upload(item):
             {"Content-Type": "text/html; charset=utf-8", "x-upsert": "true"})
     record = {"project_id": item["project_id"], "section": item.get("section", ""), "sheet": item["sheet"],
               "file_path": file_path, "source_hash": digest, "updated_at": datetime.now(timezone.utc).isoformat()}
+    if item.get("revision_date"):
+        record["revision_date"] = item["revision_date"]
     request("POST", "/rest/v1/drawings?on_conflict=file_path", json.dumps(record).encode(),
             {"Content-Type": "application/json", "Prefer": "resolution=merge-duplicates"})
     print(f"обновлён: {item['sheet']}")
