@@ -6496,17 +6496,38 @@
         }
 
         const zonesStorageKey = () => `skkg-zones:${zonesState.projectId}:${normName(zonesState.drawing?.sheet)}`;
+        // Зоны хранятся в Supabase (plan_zones, у каждого пользователя свои) — так они одинаковые на телефоне
+        // и компьютере. Копия в браузере нужна, если нет связи или таблица ещё не создана.
+        let zonesSaveTimer = null;
         function zonesSave() {
-            try { localStorage.setItem(zonesStorageKey(), JSON.stringify({ zones: zonesState.zones, picked: [...zonesState.picked] })); } catch (e) { /* без сохранения */ }
+            const st = zonesState;
+            if (!st?.drawing) return;
+            const data = { zones: st.zones, picked: [...st.picked] };
+            try { localStorage.setItem(zonesStorageKey(), JSON.stringify(data)); } catch (e) { /* без сохранения */ }
+            const row = { project_id: st.projectId, sheet: normName(st.drawing.sheet), ...data, updated_at: new Date().toISOString() };
+            clearTimeout(zonesSaveTimer);
+            zonesSaveTimer = setTimeout(async () => {
+                const { error } = await sb.from('plan_zones').upsert(row, { onConflict: 'user_id,project_id,sheet' });
+                if (error) console.warn('Зоны сохранены только в этом браузере:', error.message);
+            }, 600);
         }
-        function zonesLoadSaved() {
-            let saved = {};
-            try { saved = JSON.parse(localStorage.getItem(zonesStorageKey()) || '{}') || {}; } catch (e) { /* пусто */ }
+        function zonesNormalize(saved) {
             if (Array.isArray(saved)) saved = { zones: saved };   // раньше хранились только зоны
+            saved = saved || {};
             return {
                 zones: (Array.isArray(saved.zones) ? saved.zones : []).filter(x => Array.isArray(x.pts) && x.pts.length > 2),
                 picked: Array.isArray(saved.picked) ? saved.picked : [],
             };
+        }
+        async function zonesLoadSaved() {
+            const st = zonesState;
+            let local = null;
+            try { local = JSON.parse(localStorage.getItem(zonesStorageKey()) || 'null'); } catch (e) { /* пусто */ }
+            const { data, error } = await sb.from('plan_zones').select('zones, picked').eq('project_id', st.projectId).eq('sheet', normName(st.drawing.sheet));
+            if (!error && data?.length) return { ...zonesNormalize(data[0]), fromServer: true };
+            const res = zonesNormalize(local);
+            res.pushLocal = !error && (res.zones.length > 0 || res.picked.length > 0);   // нарисованное раньше в этом браузере — переносим на сервер
+            return res;
         }
 
         async function openZonesCounter() {
@@ -6569,9 +6590,11 @@
             else { const b = g.getBBox(); st.baseVb = [b.x, b.y, b.width, b.height]; }
             st.vb = st.baseVb.slice();
             zonesIndexParcels();
-            const saved = zonesLoadSaved();
+            const saved = await zonesLoadSaved();
+            if (zonesState !== st || st.drawing !== d) return;
             st.zones = saved.zones;
             st.picked = new Set(saved.picked.filter(k => st.parcels.has(k)));
+            if (saved.pushLocal) zonesSave();
             zonesSetLoading('');
             zonesApplyViewBox();
             zonesRender();
