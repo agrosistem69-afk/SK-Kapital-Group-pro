@@ -1647,6 +1647,13 @@
         #zonesSvg .ld .ln { stroke-width: .7px; }
         #zonesSvg .hb { fill: #fff; fill-opacity: .75; stroke: none; }
         #zonesSvg { cursor: grab; }
+        #zonesSvg.zones-picking { cursor: pointer; }
+        #zonesSvg.zones-picking g.it[data-p]:not(.ld) path { pointer-events: all; }
+        #zonesSvg.zones-picking g.it[data-p]:hover path { stroke: #f59e0b; stroke-width: 2px; vector-effect: non-scaling-stroke; }
+        #zonesSvg g.zpick:not(.ld) path[fill] { fill: #f97316 !important; fill-opacity: .75; }
+        #zonesSvg g.zpick:not(.ld) path { stroke: #c2410c !important; stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
+        #zonesSvg g.ld.zpick .ln { stroke: #c2410c !important; stroke-width: 2px; }
+        #zonesSvg g.ld.zpick .hb { fill: #fed7aa; fill-opacity: 1; }
     </style>
     <div id="zonesModal" class="fixed inset-0 bg-white z-[60] flex flex-col hidden">
         <div class="flex items-center gap-3 px-4 py-2 bg-slate-900 text-white">
@@ -6257,7 +6264,7 @@
                     const hb = body.match(/<rect class="hb" x="([-\d.]+)" y="([-\d.]+)" width="([\d.]+)" height="([\d.]+)"/);
                     if (hb) pts = [[+hb[1] + hb[3] / 2, +hb[2] + hb[4] / 2]];
                 }
-                if (pts.length) callouts.push({ pos, qty, pts });
+                if (pts.length) callouts.push({ pos, qty, pts, h: (a.match(/data-h="([^"]*)"/) || [])[1] || '' });
             }
             return { svg, viewBox: viewBox && viewBox.length === 4 && viewBox.every(Number.isFinite) ? viewBox : null, frames, callouts };
         }
@@ -6490,18 +6497,26 @@
 
         const zonesStorageKey = () => `skkg-zones:${zonesState.projectId}:${normName(zonesState.drawing?.sheet)}`;
         function zonesSave() {
-            try { localStorage.setItem(zonesStorageKey(), JSON.stringify(zonesState.zones)); } catch (e) { /* без сохранения */ }
+            try { localStorage.setItem(zonesStorageKey(), JSON.stringify({ zones: zonesState.zones, picked: [...zonesState.picked] })); } catch (e) { /* без сохранения */ }
         }
         function zonesLoadSaved() {
-            try { const z = JSON.parse(localStorage.getItem(zonesStorageKey()) || '[]'); return Array.isArray(z) ? z.filter(x => Array.isArray(x.pts) && x.pts.length > 2) : []; }
-            catch (e) { return []; }
+            let saved = {};
+            try { saved = JSON.parse(localStorage.getItem(zonesStorageKey()) || '{}') || {}; } catch (e) { /* пусто */ }
+            if (Array.isArray(saved)) saved = { zones: saved };   // раньше хранились только зоны
+            return {
+                zones: (Array.isArray(saved.zones) ? saved.zones : []).filter(x => Array.isArray(x.pts) && x.pts.length > 2),
+                picked: Array.isArray(saved.picked) ? saved.picked : [],
+            };
         }
 
         async function openZonesCounter() {
             const projectId = volumesState.projectId;
             if (!projectId) { alert('Сначала выберите проект.'); return; }
             if (!zonesPointerReady) { initZonesPointer(); zonesPointerReady = true; }
-            zonesState = { projectId, drawings: [], drawing: null, plan: null, rows: [], zones: [], draft: null, vb: null, baseVb: null, selected: -1 };
+            let mode = 'pick';
+            try { mode = localStorage.getItem('skkg-zones-mode') === 'draw' ? 'draw' : 'pick'; } catch (e) { /* по умолчанию выбор */ }
+            zonesState = { projectId, mode, drawings: [], drawing: null, plan: null, rows: [], zones: [], draft: null, vb: null, baseVb: null, selected: -1,
+                parcels: new Map(), parcelOf: new WeakMap(), parcelArea: new WeakMap(), picked: new Set(), lit: [] };
             openModal('zonesModal');
             document.getElementById('zonesPanel').innerHTML = '';
             zonesSetLoading('Загружаю список листов...');
@@ -6532,6 +6547,7 @@
             const d = st.drawings.find(x => x.id === drawingId);
             if (!d) return;
             st.drawing = d; st.plan = null; st.draft = null; st.selected = -1;
+            st.parcels = new Map(); st.parcelOf = new WeakMap(); st.parcelArea = new WeakMap(); st.picked = new Set(); st.lit = [];
             document.getElementById('zonesPlan').replaceChildren();
             document.getElementById('zonesOverlay').replaceChildren();
             document.getElementById('zonesPanel').innerHTML = '';
@@ -6552,7 +6568,10 @@
             if (plan.viewBox) st.baseVb = plan.viewBox.slice();
             else { const b = g.getBBox(); st.baseVb = [b.x, b.y, b.width, b.height]; }
             st.vb = st.baseVb.slice();
-            st.zones = zonesLoadSaved();
+            zonesIndexParcels();
+            const saved = zonesLoadSaved();
+            st.zones = saved.zones;
+            st.picked = new Set(saved.picked.filter(k => st.parcels.has(k)));
             zonesSetLoading('');
             zonesApplyViewBox();
             zonesRender();
@@ -6647,6 +6666,7 @@
 
         function zonesClick(e) {
             const st = zonesState;
+            if (st.mode === 'pick') { zonesPickAt(e.clientX, e.clientY); return; }
             if (!st.draft) {
                 // Касание внутри зоны — выделить её в списке.
                 const p = zonesToPlan(e.clientX, e.clientY);
@@ -6699,6 +6719,8 @@
         }
 
         function zonesRender() {
+            zonesHighlightPicked();
+            document.getElementById('zonesSvg').classList.toggle('zones-picking', zonesState?.mode === 'pick');
             zonesRenderOverlay();
             zonesRenderToolbar();
             zonesRenderPanel();
@@ -6708,8 +6730,15 @@
             const st = zonesState, el = document.getElementById('zonesToolbar');
             const btn = 'pointer-events-auto px-3 py-2 rounded-lg text-sm font-semibold shadow-sm';
             if (!st?.plan) { el.innerHTML = ''; return; }
+            const tab = (m, icon, label) => `<button onclick="zonesSetMode('${m}')" class="px-3 py-1.5 rounded-md text-sm font-semibold ${st.mode === m ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-100'}"><i class="fa-solid ${icon} mr-1"></i>${label}</button>`;
+            const modes = `<div class="pointer-events-auto flex bg-white border border-slate-300 rounded-lg p-0.5 shadow-sm">${tab('pick', 'fa-hand-pointer', 'Выбрать участки')}${tab('draw', 'fa-draw-polygon', 'Обвести зону')}</div>`;
+            if (st.mode === 'pick') {
+                el.innerHTML = modes + (st.picked.size ? `<button onclick="zonesClearPicked()" class="${btn} bg-white border border-slate-300 text-slate-700">Снять выбор</button>` : '');
+                document.getElementById('zonesHint').textContent = 'Нажимайте на участки на плане: они подсветятся и сложатся. Повторное нажатие снимает выбор';
+                return;
+            }
             if (!st.draft) {
-                el.innerHTML = `<button onclick="zonesStartDraft()" class="${btn} bg-brand-600 hover:bg-brand-700 text-white"><i class="fa-solid fa-draw-polygon mr-1"></i>Новая зона</button>`;
+                el.innerHTML = modes + `<button onclick="zonesStartDraft()" class="${btn} bg-brand-600 hover:bg-brand-700 text-white"><i class="fa-solid fa-plus mr-1"></i>Новая зона</button>`;
                 document.getElementById('zonesHint').textContent = st.zones.length ? 'Нажмите на зону на плане, чтобы выделить её в списке' : 'Нажмите «Новая зона» и обведите участок по точкам';
                 return;
             }
@@ -6724,7 +6753,7 @@
 
         function zonesRenderOverlay() {
             const st = zonesState, layer = document.getElementById('zonesOverlay');
-            if (!st?.plan || !st.vb) { layer.innerHTML = ''; return; }
+            if (!st?.plan || !st.vb || st.mode === 'pick') { if (layer) layer.innerHTML = ''; return; }
             const k = zonesUnitsPerPx();
             const pts = p => p.map(([x, y]) => `${x},${y}`).join(' ');
             let out = '';
@@ -6776,6 +6805,7 @@
         function zonesRenderPanel() {
             const st = zonesState, panel = document.getElementById('zonesPanel');
             if (!st?.plan) { panel.innerHTML = ''; return; }
+            if (st.mode === 'pick') { zonesRenderPickPanel(panel); return; }
             const zonesHtml = st.zones.length ? st.zones.map((z, i) => `
                 <div class="flex items-center gap-2 py-1.5 ${i === st.selected ? 'bg-slate-50 -mx-2 px-2 rounded-lg' : ''}">
                     <span class="w-3 h-3 rounded-full flex-shrink-0" style="background:${z.color}"></span>
@@ -6819,6 +6849,7 @@
 
         async function zonesExportExcel() {
             const st = zonesState;
+            if (st?.mode === 'pick') return zonesExportPicked();
             if (!st?.zones.length) return;
             try { await loadXlsxLib(); } catch (e) { alert(e.message); return; }
             const res = zonesCompute();
@@ -6831,6 +6862,159 @@
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, 'Объёмы по зонам');
             XLSX.writeFile(wb, `Объёмы по зонам - ${st.drawing.sheet.replace(/[\\/:*?"<>|]/g, ' ')}.xlsx`);
+        }
+
+        // ---- Режим «Выбрать участки»: участок — место, на которое указывает выноска с количеством ----
+        // Посадки на плане (цветники, кусты, деревья) привязаны к позиции ведомости. Каждую такую фигуру
+        // относим к острию выноски той же позиции: в фигуру с остриём, иначе в ближайшее остриё.
+        function zonesIndexParcels() {
+            const st = zonesState, root = document.getElementById('zonesPlan');
+            const byPos = {};
+            st.plan.callouts.forEach(c => {
+                const label = c.h ? root.querySelector(`g.it.ld[data-h="${CSS.escape(c.h)}"]`) : null;
+                const keys = c.pts.map(pt => {
+                    const key = `${c.pos}@${pt[0]},${pt[1]}`;
+                    let pr = st.parcels.get(key);
+                    if (!pr) { pr = { key, pos: c.pos, qty: 0, pt, els: [], labels: [] }; st.parcels.set(key, pr); (byPos[c.pos] ||= []).push(pr); }
+                    pr.qty += c.qty / c.pts.length;
+                    if (label && !pr.labels.includes(label)) pr.labels.push(label);
+                    return key;
+                });
+                if (label) st.parcelOf.set(label, keys);
+            });
+            const contains = (g, x, y) => {
+                const pt = new DOMPoint(x, y);
+                return [...g.querySelectorAll('path,rect,circle,ellipse,polygon')].some(el => el.isPointInFill?.(pt) || el.isPointInStroke?.(pt));
+            };
+            const inBox = (b, x, y, pad) => x >= b.x - pad && x <= b.x + b.width + pad && y >= b.y - pad && y <= b.y + b.height + pad;
+            const items = [...root.querySelectorAll('g.it[data-p]:not(.ld)')].filter(g => byPos[g.dataset.p]).map(g => ({ g, pos: g.dataset.p, b: g.getBBox() }));
+            const tipItems = new Map();
+            items.forEach(it => {
+                const hit = byPos[it.pos].find(pr => inBox(it.b, pr.pt[0], pr.pt[1], 0.05) && contains(it.g, pr.pt[0], pr.pt[1]));
+                if (hit) { it.parcel = hit; if (!tipItems.has(hit)) tipItems.set(hit, []); tipItems.get(hit).push(it); }
+            });
+            items.forEach(it => {
+                if (it.parcel) return;
+                const cx = it.b.x + it.b.width / 2, cy = it.b.y + it.b.height / 2;
+                const cands = byPos[it.pos];
+                it.parcel = cands.find(pr => (tipItems.get(pr) || []).some(t => inBox(t.b, cx, cy, 0) && contains(t.g, cx, cy)))
+                    || cands.reduce((best, pr) => { const d = Math.hypot(pr.pt[0] - cx, pr.pt[1] - cy); return !best || d < best.d ? { pr, d } : best; }, null).pr;
+            });
+            items.forEach(it => { it.parcel.els.push(it.g); st.parcelOf.set(it.g, [it.parcel.key]); st.parcelArea.set(it.g, it.b.width * it.b.height); });
+        }
+
+        function zonesSetMode(mode) {
+            const st = zonesState;
+            if (!st) return;
+            st.mode = mode; st.draft = null; st.selected = -1;
+            try { localStorage.setItem('skkg-zones-mode', mode); } catch (e) { /* не запоминаем */ }
+            zonesRender();
+        }
+
+        // Нажатие: ищем под пальцем посадку или выноску (с небольшим допуском вокруг) и включаем/выключаем её участок.
+        function zonesPickAt(clientX, clientY) {
+            const st = zonesState;
+            // Из всего, что под пальцем, берём самую маленькую фигуру: крупный контур не перекрывает кусты внутри.
+            const find = (x, y) => {
+                let best = null;
+                for (const el of document.elementsFromPoint(x, y)) {
+                    for (let g = el.closest?.('g.it'); g; g = g.parentElement?.closest('g.it')) {
+                        const keys = st.parcelOf.get(g);
+                        if (!keys) continue;
+                        const area = g.classList.contains('ld') ? 0 : (st.parcelArea.get(g) ?? Infinity);
+                        if (!best || area < best.area) best = { keys, area };
+                    }
+                }
+                return best?.keys || null;
+            };
+            let keys = find(clientX, clientY);
+            for (let r = 4; !keys && r <= 12; r += 4)
+                for (let a = 0; a < 8 && !keys; a++) keys = find(clientX + r * Math.cos(a * Math.PI / 4), clientY + r * Math.sin(a * Math.PI / 4));
+            if (!keys) return;
+            const allOn = keys.every(k => st.picked.has(k));
+            keys.forEach(k => allOn ? st.picked.delete(k) : st.picked.add(k));
+            zonesSave();
+            zonesRender();
+        }
+
+        function zonesHighlightPicked() {
+            const st = zonesState;
+            if (!st) return;
+            st.lit.forEach(g => g.classList.remove('zpick'));
+            st.lit = [];
+            if (st.mode !== 'pick') return;
+            st.picked.forEach(k => {
+                const pr = st.parcels.get(k);
+                if (pr) [...pr.els, ...pr.labels].forEach(g => { g.classList.add('zpick'); st.lit.push(g); });
+            });
+        }
+
+        function zonesClearPicked() { if (!zonesState) return; zonesState.picked.clear(); zonesSave(); zonesRender(); }
+        function zonesUnpickPos(pos) {
+            const st = zonesState;
+            [...st.picked].forEach(k => { if (st.parcels.get(k)?.pos === pos) st.picked.delete(k); });
+            zonesSave();
+            zonesRender();
+        }
+
+        function zonesPickedRows() {
+            const st = zonesState, sum = {}, count = {};
+            st.picked.forEach(k => {
+                const pr = st.parcels.get(k);
+                if (!pr) return;
+                sum[pr.pos] = (sum[pr.pos] || 0) + pr.qty;
+                count[pr.pos] = (count[pr.pos] || 0) + 1;
+            });
+            const info = {};
+            st.rows.forEach(r => { if (r.pos && !info[r.pos]) info[r.pos] = r; });
+            const order = st.rows.map(r => r.pos).filter((p, i, a) => p && a.indexOf(p) === i);
+            Object.keys(sum).forEach(p => { if (!order.includes(p)) order.push(p); });
+            return order.filter(p => sum[p]).map(p => {
+                const r = info[p] || { name: `Позиция ${p}`, unit: '' };
+                return { pos: p, name: r.name, unit: r.unit, qty: roundQty(sum[p], r.unit), parcels: count[p] };
+            });
+        }
+
+        function zonesRenderPickPanel(panel) {
+            const st = zonesState, rows = zonesPickedRows();
+            panel.innerHTML = `
+                <div class="flex items-center justify-between mb-2">
+                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide">Выбрано участков: ${st.picked.size}</h4>
+                    ${st.picked.size ? '<button onclick="zonesClearPicked()" class="text-xs text-rose-600 hover:text-rose-700">Снять выбор</button>' : ''}
+                </div>
+                ${rows.length ? `
+                    <table class="w-full text-sm">
+                        <thead><tr class="text-[11px] text-slate-500 text-left border-b border-slate-200">
+                            <th class="py-1.5 pr-2 font-medium">Материал</th>
+                            <th class="py-1.5 px-2 font-medium text-right">Участков</th>
+                            <th class="py-1.5 pl-2 font-semibold text-right text-slate-700">Сумма</th>
+                            <th class="w-6"></th>
+                        </tr></thead>
+                        <tbody class="divide-y divide-slate-100">${rows.map(r => `
+                            <tr>
+                                <td class="py-1.5 pr-2 text-slate-800"><span class="text-slate-400">${escapeHtml(r.pos)}.</span> ${escapeHtml(r.name)}</td>
+                                <td class="py-1.5 px-2 text-right text-slate-500">${r.parcels}</td>
+                                <td class="py-1.5 pl-2 text-right font-semibold whitespace-nowrap">${fmtQty(r.qty)} <span class="font-normal text-slate-400">${escapeHtml(r.unit)}</span></td>
+                                <td class="text-right"><button onclick="zonesUnpickPos('${escapeHtml(r.pos)}')" title="Убрать из выбора" class="w-6 h-6 text-slate-300 hover:text-rose-600"><i class="fa-solid fa-xmark text-xs"></i></button></td>
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>
+                    <button onclick="zonesExportExcel()" class="mt-3 w-full bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold"><i class="fa-solid fa-file-excel mr-1"></i>Скачать в Excel</button>`
+                : '<div class="text-sm text-slate-400">Нажмите на цветник, куст, дерево или газон на плане. Выбранные участки подсветятся оранжевым, а их количество сложится здесь.</div>'}
+                <div class="text-[11px] text-slate-400 mt-4">Участок — это место, на которое указывает выноска с количеством. Количество участка берётся из этой выноски. Нажатие на саму выноску выбирает все её участки.</div>`;
+        }
+
+        async function zonesExportPicked() {
+            const st = zonesState, rows = zonesPickedRows();
+            if (!rows.length) return;
+            try { await loadXlsxLib(); } catch (e) { alert(e.message); return; }
+            const ws = XLSX.utils.aoa_to_sheet([[st.drawing.sheet], [`Выбрано участков: ${st.picked.size}`], [],
+                ['Поз.', 'Материал', 'Ед.', 'Участков', 'Количество'],
+                ...rows.map(r => [r.pos, r.name, r.unit, r.parcels, r.qty])]);
+            ws['!cols'] = [{ wch: 6 }, { wch: 50 }, { wch: 6 }, { wch: 10 }, { wch: 12 }];
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Выбранные участки');
+            XLSX.writeFile(wb, `Объёмы по участкам - ${st.drawing.sheet.replace(/[\\/:*?"<>|]/g, ' ')}.xlsx`);
         }
 
         async function openVolumesHistory() {
