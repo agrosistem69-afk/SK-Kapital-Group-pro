@@ -242,7 +242,8 @@
                     <i class="fa-solid fa-upload"></i> Загрузить лист
                 </button>
             </div>
-            <p class="text-sm text-slate-500 mb-4">Актуальные листы по всем вашим проектам. У каждого листа указана дата редакции: чем зеленее отметка, тем свежее лист.</p>
+            <button id="drawingsBackToProject" onclick="openProject(appData.currentProjectId)" class="hidden text-sm text-brand-600 hover:text-brand-700 font-semibold mb-2"><i class="fa-solid fa-arrow-left mr-1"></i> <span></span></button>
+            <p id="drawingsScreenHint" class="text-sm text-slate-500 mb-4">Актуальные листы по всем вашим проектам. У каждого листа указана дата редакции: чем зеленее отметка, тем свежее лист.</p>
             <div id="drawingsScreenFormSlot"></div>
             <select id="drawingsProjectFilter" onchange="renderAllDrawings()" class="bg-white border border-slate-300 rounded-lg text-sm px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-brand-500">
                 <option value="all">Все проекты</option>
@@ -5450,7 +5451,11 @@
             `).join('');
         }
 
+        // Если вкладку нажали внутри проекта — показываем листы только этого проекта, без выбора других.
+        // С главного экрана — все проекты с фильтром.
         async function showDrawingsScreen() {
+            const fromProject = !document.getElementById('projectView').classList.contains('hidden')
+                || (!document.getElementById('drawingsScreen').classList.contains('hidden') && drawingsScreenProjectOnly);
             ['boardsScreen', 'projectView', 'accountingScreen', 'ptoScreen'].forEach(id => document.getElementById(id).classList.add('hidden'));
             document.getElementById('drawingsScreen').classList.remove('hidden');
             document.getElementById('createProjectFab').classList.add('hidden');
@@ -5461,8 +5466,21 @@
             sel.innerHTML = '<option value="all">Все проекты</option>' +
                 appData.projects.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
             sel.value = appData.projects.some(p => p.id === currentVal) ? currentVal : 'all';
+            const currentProj = fromProject && appData.projects.find(p => p.id === appData.currentProjectId);
+            if (!currentProj && drawingsScreenProjectOnly) sel.value = 'all'; // вышли из проекта — снова все проекты
+            drawingsScreenProjectOnly = !!currentProj;
+            if (currentProj) sel.value = currentProj.id;
+            sel.classList.toggle('hidden', !!currentProj);
+            const back = document.getElementById('drawingsBackToProject');
+            back.classList.toggle('hidden', !currentProj);
+            back.querySelector('span').textContent = currentProj ? currentProj.name : '';
+            document.getElementById('drawingsScreenHint').textContent = currentProj
+                ? 'Листы этого проекта. У каждого листа указана дата редакции: чем зеленее отметка, тем свежее лист.'
+                : 'Актуальные листы по всем вашим проектам. У каждого листа указана дата редакции: чем зеленее отметка, тем свежее лист.';
             await renderAllDrawings();
         }
+
+        let drawingsScreenProjectOnly = false;
 
         // Все листы, которые видит пользователь (RLS сама отсекает чужие проекты), по проектам и разделам.
         async function renderAllDrawings() {
@@ -5539,7 +5557,7 @@
                 sel.value = appData.currentProjectId;
                 if (drawingsSectionCollapsed) toggleDrawingsSection();
             }
-            document.getElementById('drawingUploadProjectWrap').classList.toggle('hidden', context !== 'screen');
+            document.getElementById('drawingUploadProjectWrap').classList.toggle('hidden', context !== 'screen' || drawingsScreenProjectOnly);
             if (!document.getElementById('drawingUploadRevision').value) {
                 document.getElementById('drawingUploadRevision').value = new Date().toISOString().slice(0, 10);
             }
