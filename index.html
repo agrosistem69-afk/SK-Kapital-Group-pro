@@ -2183,6 +2183,7 @@
                 card.innerHTML = `
                     <button class="w-full h-24 sm:h-28 rounded-xl overflow-hidden shadow-sm border border-slate-200 group-hover:shadow-md transition-shadow block" style="${bgStyle}"></button>
                     <span class="block mt-2 ml-1 text-base font-bold text-slate-900 leading-snug">${p.name}</span>
+                    <div class="ml-1 mt-0.5" data-project-revision="${p.id}"></div>
                 `;
                 card.querySelector('button').onclick = () => openProject(p.id);
                 grid.appendChild(card);
@@ -2191,6 +2192,27 @@
             if (appData.projects.length === 0 && currentUserRole !== 'manager') {
                 grid.innerHTML = '<p class="col-span-full text-sm text-slate-500">Нет доступных проектов. Обратитесь к руководителю.</p>';
             }
+            fillProjectRevisions();
+        }
+
+        // Дата редакции проекта = самая свежая дата редакции среди его листов (из штампа чертежа,
+        // вводится при загрузке). Показываем под названием проекта на главном экране.
+        async function fillProjectRevisions() {
+            const { data, error } = await sb.from('drawings').select('project_id, revision_date');
+            if (error) return;
+            const latest = latestRevisionByProject(data || []);
+            document.querySelectorAll('[data-project-revision]').forEach(el => {
+                const rev = latest[el.dataset.projectRevision];
+                el.innerHTML = rev ? drawingRevisionBadge(rev, true) : '';
+            });
+        }
+
+        function latestRevisionByProject(rows) {
+            const latest = {};
+            rows.forEach(d => {
+                if (d.revision_date && (!latest[d.project_id] || d.revision_date > latest[d.project_id])) latest[d.project_id] = d.revision_date;
+            });
+            return latest;
         }
 
         function setActiveNavTab(tab) {
@@ -5464,11 +5486,15 @@
             const byProject = {};
             data.forEach(d => { (byProject[d.project_id] = byProject[d.project_id] || []).push(d); });
             const projectName = id => (appData.projects.find(p => p.id === id) || {}).name || 'Проект';
+            const latest = latestRevisionByProject(data);
             listEl.innerHTML = Object.keys(byProject)
                 .sort((a, b) => projectName(a).localeCompare(projectName(b), 'ru'))
                 .map(pid => `
                     <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-200">
-                        <h3 class="text-base font-bold text-slate-900 mb-3">${escapeHtml(projectName(pid))}</h3>
+                        <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 mb-3">
+                            <h3 class="text-base font-bold text-slate-900">${escapeHtml(projectName(pid))}</h3>
+                            ${latest[pid] ? `<div class="text-xs">${drawingRevisionBadge(latest[pid])}</div>` : '<div class="text-[11px] text-slate-400">Дата редакции не указана</div>'}
+                        </div>
                         <div class="space-y-4">${renderDrawingGroups(byProject[pid])}</div>
                     </div>
                 `).join('');
@@ -5487,13 +5513,14 @@
         }
 
         // Дата редакции и насколько она свежая: до 30 дней зелёная, до 90 жёлтая, дальше красная.
-        function drawingRevisionBadge(revisionDate) {
+        // compact — короткий вариант для карточки проекта на главной (на телефоне мало места).
+        function drawingRevisionBadge(revisionDate, compact) {
             if (!revisionDate) return '<div class="text-[11px] text-slate-400">Дата редакции не указана</div>';
             const rev = new Date(revisionDate + 'T00:00:00');
             const days = Math.max(0, Math.floor((Date.now() - rev.getTime()) / 86400000));
             const color = days <= 30 ? 'bg-emerald-500' : days <= 90 ? 'bg-amber-500' : 'bg-rose-500';
             const ago = days === 0 ? 'сегодня' : `${days} дн. назад`;
-            return `<div class="flex items-center gap-1.5 text-[11px] text-slate-600"><span class="inline-block w-2 h-2 rounded-full ${color} flex-shrink-0"></span><span class="truncate">Редакция от ${rev.toLocaleDateString('ru-RU')} · ${ago}</span></div>`;
+            return `<div class="flex items-center gap-1.5 text-[11px] text-slate-600"><span class="inline-block w-2 h-2 rounded-full ${color} flex-shrink-0"></span><span class="truncate">Редакция от ${rev.toLocaleDateString('ru-RU')}${compact ? '' : ` · ${ago}`}</span></div>`;
         }
 
         // context: 'project' — форма в разделе проекта, 'screen' — на экране «Чертежи» с выбором проекта.
