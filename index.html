@@ -234,6 +234,16 @@
             <i class="fa-solid fa-plus text-xl"></i> Создать проект
         </button>
 
+        <!-- Экран "Чертежи" — листы всех доступных проектов, сгруппированные по проекту и разделу -->
+        <div id="drawingsScreen" class="hidden flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-40">
+            <h2 class="text-xl font-bold text-slate-900 mb-1">Чертежи</h2>
+            <p class="text-sm text-slate-500 mb-4">Актуальные листы по всем вашим проектам. Новый лист загружается на странице проекта, в разделе «Чертежи».</p>
+            <select id="drawingsProjectFilter" onchange="renderAllDrawings()" class="bg-white border border-slate-300 rounded-lg text-sm px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-brand-500">
+                <option value="all">Все проекты</option>
+            </select>
+            <div id="allDrawingsList" class="space-y-6"></div>
+        </div>
+
         <!-- Экран "Бухгалтерия" — единая лента накладных/УПД со всех проектов -->
         <div id="accountingScreen" class="hidden flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-40">
             <h2 class="text-xl font-bold text-slate-900 mb-1">Бухгалтерия</h2>
@@ -494,6 +504,43 @@
                 </button>
             </div>
 
+            <!-- Интерактивные чертежи (листы DWG, собранные сборщиком в HTML) -->
+            <div id="drawingsSection" data-roles="manager,worker,lead,pto" class="hidden bg-white rounded-xl p-5 shadow-sm border border-slate-200 mb-6 scroll-mt-20">
+                <div class="flex items-center justify-between gap-3 mb-3">
+                    <button onclick="toggleDrawingsSection()" class="flex items-center gap-2 text-left">
+                        <i id="drawingsSectionChevron" class="fa-solid fa-chevron-down text-slate-400 text-xs transition-transform"></i>
+                        <h3 class="text-base font-bold text-slate-900">Чертежи</h3>
+                        <span id="projectDrawingsCount" class="text-xs font-semibold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">0</span>
+                    </button>
+                    <button data-roles="manager" onclick="toggleDrawingUploadForm()" class="hidden bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-semibold items-center gap-2 shadow-sm transition-colors">
+                        <i class="fa-solid fa-upload"></i> Загрузить лист
+                    </button>
+                </div>
+                <div id="drawingsSectionBody">
+                    <p class="text-xs text-slate-500 mb-3">Актуальные листы проекта. Обновляются автоматически после сохранения DWG на сервере компании.</p>
+                    <!-- Ручная загрузка готового HTML-листа руководителем (пока не настроена выгрузка с сервера) -->
+                    <form id="drawingUploadForm" onsubmit="uploadDrawingSheet(event)" class="hidden border border-slate-200 rounded-lg p-4 mb-4 bg-slate-50 space-y-3">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <label class="block text-xs font-semibold text-slate-600">Раздел
+                                <input id="drawingUploadSection" type="text" placeholder="Например: Озеленение" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-normal">
+                            </label>
+                            <label class="block text-xs font-semibold text-slate-600">Название листа
+                                <input id="drawingUploadSheet" type="text" required placeholder="Например: Лист 11.1. Посадочный план" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-normal">
+                            </label>
+                        </div>
+                        <label class="block text-xs font-semibold text-slate-600">Файл листа (.html)
+                            <input id="drawingUploadFile" type="file" accept=".html,.htm,text/html" required class="mt-1 block w-full text-sm font-normal">
+                        </label>
+                        <div id="drawingUploadError" class="hidden text-xs text-rose-600"></div>
+                        <div class="flex gap-2">
+                            <button id="drawingUploadBtn" type="submit" class="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Загрузить</button>
+                            <button type="button" onclick="toggleDrawingUploadForm()" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-200">Отмена</button>
+                        </div>
+                    </form>
+                    <div id="projectDrawingsList" class="space-y-4"></div>
+                </div>
+            </div>
+
             <!-- Раздел "Пропуска на объект" временно убран из интерфейса по просьбе пользователя (не совсем
                  то, что нужно) — вернуться к нему позже. HTML-разметка и JS-логика (openPassModal,
                  renderProjectPasses, openPassRequestModal и т.д.) оставлены в файле ниже без изменений,
@@ -585,43 +632,6 @@
                     </div>
                 </div>
 
-                <!-- Интерактивные чертежи (листы DWG, собранные сборщиком в HTML) -->
-                <div id="drawingsSection" data-roles="manager,worker,lead,pto" class="hidden bg-white rounded-xl p-5 shadow-sm border border-slate-200 mb-6 scroll-mt-20">
-                    <div class="flex items-center justify-between gap-3 mb-3">
-                        <button onclick="toggleDrawingsSection()" class="flex items-center gap-2 text-left">
-                            <i id="drawingsSectionChevron" class="fa-solid fa-chevron-down text-slate-400 text-xs transition-transform"></i>
-                            <h3 class="text-base font-bold text-slate-900">Чертежи</h3>
-                            <span id="projectDrawingsCount" class="text-xs font-semibold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">0</span>
-                        </button>
-                        <button data-roles="manager" onclick="toggleDrawingUploadForm()" class="hidden bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-semibold items-center gap-2 shadow-sm transition-colors">
-                            <i class="fa-solid fa-upload"></i> Загрузить лист
-                        </button>
-                    </div>
-                    <div id="drawingsSectionBody">
-                        <p class="text-xs text-slate-500 mb-3">Актуальные листы проекта. Обновляются автоматически после сохранения DWG на сервере компании.</p>
-                        <!-- Ручная загрузка готового HTML-листа руководителем (пока не настроена выгрузка с сервера) -->
-                        <form id="drawingUploadForm" onsubmit="uploadDrawingSheet(event)" class="hidden border border-slate-200 rounded-lg p-4 mb-4 bg-slate-50 space-y-3">
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <label class="block text-xs font-semibold text-slate-600">Раздел
-                                    <input id="drawingUploadSection" type="text" placeholder="Например: Озеленение" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-normal">
-                                </label>
-                                <label class="block text-xs font-semibold text-slate-600">Название листа
-                                    <input id="drawingUploadSheet" type="text" required placeholder="Например: Лист 11.1. Посадочный план" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-normal">
-                                </label>
-                            </div>
-                            <label class="block text-xs font-semibold text-slate-600">Файл листа (.html)
-                                <input id="drawingUploadFile" type="file" accept=".html,.htm,text/html" required class="mt-1 block w-full text-sm font-normal">
-                            </label>
-                            <div id="drawingUploadError" class="hidden text-xs text-rose-600"></div>
-                            <div class="flex gap-2">
-                                <button id="drawingUploadBtn" type="submit" class="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Загрузить</button>
-                                <button type="button" onclick="toggleDrawingUploadForm()" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-200">Отмена</button>
-                            </div>
-                        </form>
-                        <div id="projectDrawingsList" class="space-y-4"></div>
-                    </div>
-                </div>
-
                 <!-- Задачи ПТО по объекту -->
                 <div id="ptoTasksSection" class="bg-white rounded-xl p-5 shadow-sm border border-slate-200 mb-6 scroll-mt-20">
                     <div class="flex items-center justify-between gap-3 mb-3">
@@ -708,7 +718,7 @@
              роли (например "Сотрудники"), скрываются/показываются через applyRoleUI(), как и
              остальные элементы с data-roles в этом файле. -->
         <nav class="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-2px_8px_rgba(0,0,0,0.06)] z-40 pb-[env(safe-area-inset-bottom)]">
-            <div class="max-w-7xl mx-auto grid grid-cols-5 text-slate-500">
+            <div class="max-w-7xl mx-auto grid grid-flow-col auto-cols-fr text-slate-500">
                 <button id="navProjectsBtn" onclick="showBoardsScreen()" class="flex flex-col items-center justify-center gap-1 py-2 px-0.5 text-brand-700">
                     <span class="nav-icon-wrap w-11 h-6 rounded-full bg-brand-200 flex items-center justify-center">
                         <i class="fa-solid fa-table-cells-large text-lg"></i>
@@ -728,6 +738,12 @@
                         <span id="ptoBadge" class="hidden absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center">0</span>
                     </span>
                     <span class="text-[10.5px] leading-tight font-medium text-center break-words">ПТО</span>
+                </button>
+                <button id="navDrawingsBtn" data-roles="manager,worker,lead,pto" onclick="showDrawingsScreen()" class="hidden flex-col items-center justify-center gap-1 py-2 px-0.5 hover:text-brand-600 transition-colors">
+                    <span class="nav-icon-wrap relative w-11 h-6 rounded-full flex items-center justify-center">
+                        <i class="fa-solid fa-map text-lg"></i>
+                    </span>
+                    <span class="text-[10.5px] leading-tight font-medium text-center break-words">Чертежи</span>
                 </button>
                 <button data-roles="manager,worker,lead,pto" onclick="openModal('mobileMenuModal')" class="hidden flex-col items-center justify-center gap-1 py-2 px-0.5 hover:text-brand-600 transition-colors">
                     <i class="fa-solid fa-ellipsis text-lg"></i>
@@ -1613,11 +1629,6 @@
                         <span class="text-sm font-medium text-slate-800 flex-1">Исполнительная документация</span>
                         <i class="fa-solid fa-chevron-right text-slate-300 text-xs"></i>
                     </button>
-                    <button data-roles="manager,worker,lead,pto" onclick="openProjectSection('drawingsSection')" class="hidden w-full items-center gap-4 px-5 py-4 text-left hover:bg-slate-50 transition-colors">
-                        <div class="w-10 h-10 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-map"></i></div>
-                        <span class="text-sm font-medium text-slate-800 flex-1">Чертежи</span>
-                        <i class="fa-solid fa-chevron-right text-slate-300 text-xs"></i>
-                    </button>
                     <button data-roles="manager,worker,lead,pto" onclick="openProjectSection('ptoTasksSection')" class="hidden w-full items-center gap-4 px-5 py-4 text-left hover:bg-slate-50 transition-colors">
                         <div class="w-10 h-10 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-drafting-compass"></i></div>
                         <span class="text-sm font-medium text-slate-800 flex-1">Задачи ПТО</span>
@@ -2168,7 +2179,7 @@
         }
 
         function setActiveNavTab(tab) {
-            const map = { projects: 'navProjectsBtn', accounting: 'navAccountingBtn', pto: 'navPtoBtn' };
+            const map = { projects: 'navProjectsBtn', accounting: 'navAccountingBtn', pto: 'navPtoBtn', drawings: 'navDrawingsBtn' };
             Object.entries(map).forEach(([key, id]) => {
                 const btn = document.getElementById(id);
                 if (!btn) return;
@@ -2180,6 +2191,7 @@
         }
 
         function showBoardsScreen() {
+            document.getElementById('drawingsScreen').classList.add('hidden');
             document.getElementById('boardsScreen').classList.remove('hidden');
             document.getElementById('boardsScreen').classList.add('flex-grow');
             document.getElementById('projectView').classList.add('hidden');
@@ -2191,6 +2203,7 @@
         }
 
         function openProject(projId) {
+            document.getElementById('drawingsScreen').classList.add('hidden');
             switchProject(projId);
             document.getElementById('boardsScreen').classList.add('hidden');
             document.getElementById('projectView').classList.remove('hidden');
@@ -2243,7 +2256,6 @@
                 ordersSection: () => { if (ordersSectionCollapsed) toggleOrdersSection(); },
                 inspectionsSection: () => { if (inspectionsSectionCollapsed) toggleInspectionsSection(); },
                 execDocsSection: () => { if (execDocsSectionCollapsed) toggleExecDocsSection(); },
-                drawingsSection: () => { if (drawingsSectionCollapsed) toggleDrawingsSection(); },
                 ptoTasksSection: () => { if (ptoTasksSectionCollapsed) togglePtoTasksSection(); },
             };
             if (expandIfCollapsed[sectionId]) expandIfCollapsed[sectionId]();
@@ -3382,6 +3394,7 @@
 
         // -------------------- ЭКРАН "БУХГАЛТЕРИЯ" --------------------
         async function showAccountingScreen() {
+            document.getElementById('drawingsScreen').classList.add('hidden');
             document.getElementById('boardsScreen').classList.add('hidden');
             document.getElementById('projectView').classList.add('hidden');
             document.getElementById('accountingScreen').classList.remove('hidden');
@@ -5373,10 +5386,14 @@
                 return;
             }
 
+            listEl.innerHTML = renderDrawingGroups(data);
+            appData.drawings = data;
+        }
+
+        function renderDrawingGroups(data) {
             const bySection = {};
             data.forEach(d => { (bySection[d.section || 'Без раздела'] = bySection[d.section || 'Без раздела'] || []).push(d); });
-
-            listEl.innerHTML = Object.keys(bySection).map(section => `
+            return Object.keys(bySection).map(section => `
                 <div>
                     <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-2">${escapeHtml(section)}</div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
@@ -5393,7 +5410,52 @@
                     </div>
                 </div>
             `).join('');
-            appData.drawings = data;
+        }
+
+        async function showDrawingsScreen() {
+            ['boardsScreen', 'projectView', 'accountingScreen', 'ptoScreen'].forEach(id => document.getElementById(id).classList.add('hidden'));
+            document.getElementById('drawingsScreen').classList.remove('hidden');
+            document.getElementById('createProjectFab').classList.add('hidden');
+            setActiveNavTab('drawings');
+
+            const sel = document.getElementById('drawingsProjectFilter');
+            const currentVal = sel.value;
+            sel.innerHTML = '<option value="all">Все проекты</option>' +
+                appData.projects.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+            sel.value = appData.projects.some(p => p.id === currentVal) ? currentVal : 'all';
+            await renderAllDrawings();
+        }
+
+        // Все листы, которые видит пользователь (RLS сама отсекает чужие проекты), по проектам и разделам.
+        async function renderAllDrawings() {
+            const listEl = document.getElementById('allDrawingsList');
+            const filter = document.getElementById('drawingsProjectFilter').value;
+            listEl.innerHTML = '<div class="text-xs text-slate-400 py-2">Загрузка...</div>';
+
+            let query = sb.from('drawings').select('*').order('section').order('sheet');
+            if (filter !== 'all') query = query.eq('project_id', filter);
+            const { data, error } = await query;
+            if (error) {
+                listEl.innerHTML = `<div class="text-xs text-rose-500 py-2">Не удалось загрузить: ${escapeHtml(error.message)}</div>`;
+                return;
+            }
+            appData.drawings = data || [];
+            if (!data || data.length === 0) {
+                listEl.innerHTML = '<div class="text-sm text-slate-400 py-2">Чертежей пока нет</div>';
+                return;
+            }
+
+            const byProject = {};
+            data.forEach(d => { (byProject[d.project_id] = byProject[d.project_id] || []).push(d); });
+            const projectName = id => (appData.projects.find(p => p.id === id) || {}).name || 'Проект';
+            listEl.innerHTML = Object.keys(byProject)
+                .sort((a, b) => projectName(a).localeCompare(projectName(b), 'ru'))
+                .map(pid => `
+                    <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-200">
+                        <h3 class="text-base font-bold text-slate-900 mb-3">${escapeHtml(projectName(pid))}</h3>
+                        <div class="space-y-4">${renderDrawingGroups(byProject[pid])}</div>
+                    </div>
+                `).join('');
         }
 
         function toggleDrawingUploadForm() {
@@ -5445,7 +5507,8 @@
             const { error } = await sb.from('drawings').delete().eq('id', drawingId);
             if (error) { alert('Не удалось удалить: ' + error.message); return; }
             await sb.storage.from(DRAWINGS_BUCKET).remove([d.file_path]);
-            renderProjectDrawings(d.project_id);
+            if (!document.getElementById('drawingsScreen').classList.contains('hidden')) renderAllDrawings();
+            else renderProjectDrawings(d.project_id);
         }
 
         function formatDrawingDate(iso) {
@@ -5879,6 +5942,7 @@
         }
 
         async function showPtoScreen() {
+            document.getElementById('drawingsScreen').classList.add('hidden');
             document.getElementById('boardsScreen').classList.add('hidden');
             document.getElementById('projectView').classList.add('hidden');
             document.getElementById('accountingScreen').classList.add('hidden');
