@@ -6158,6 +6158,76 @@
             } catch (e) { return []; }
         }
 
+        // ---- Синяя рамка: что за её пределами, в объёмы не идёт ----
+        // В интерактивном листе план лежит сжатым SVG (PLANZ). Синяя рамка — замкнутые контуры синего цвета
+        // в слое «МАФ, здания, границы». Выноски (позиция + количество) указывают остриём на посадку;
+        // если остриё за рамкой, это количество вычитаем из ведомости.
+        const FRAME_COLORS = ['#007fff', '#0000ff', '#0080ff', '#3f7fff'];
+        function parsePathD(d) {
+            const polys = []; let cur = null, x = 0, y = 0;
+            const re = /([MlLz])([^MlLz]*)/g; let m;
+            while ((m = re.exec(d))) {
+                const n = (m[2].match(/-?\d*\.?\d+(?:e-?\d+)?/g) || []).map(Number);
+                if (m[1] === 'M') { x = n[0]; y = n[1]; cur = [[x, y]]; polys.push(cur); for (let i = 2; i + 1 < n.length; i += 2) { x = n[i]; y = n[i + 1]; cur.push([x, y]); } }
+                else if (m[1] === 'l') { for (let i = 0; i + 1 < n.length; i += 2) { x += n[i]; y += n[i + 1]; cur.push([x, y]); } }
+                else if (m[1] === 'L') { for (let i = 0; i + 1 < n.length; i += 2) { x = n[i]; y = n[i + 1]; cur.push([x, y]); } }
+            }
+            return polys;
+        }
+        function pointInPoly([x, y], poly) {
+            let c = false;
+            for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+                const [x1, y1] = poly[i], [x2, y2] = poly[j];
+                if ((y1 > y) !== (y2 > y) && x < (x2 - x1) * (y - y1) / (y2 - y1) + x1) c = !c;
+            }
+            return c;
+        }
+        async function gunzipBase64(b64) {
+            const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+            return await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+        }
+        // → { hasFrame, outside: { позиция: количество за рамкой } } или null, если в листе нет плана.
+        async function drawingFrameExclusions(html) {
+            const planz = html.match(/PLANZ\s*=\s*"([^"]+)"/);
+            if (!planz || !('DecompressionStream' in window)) return null;
+            let svg;
+            try { svg = await gunzipBase64(planz[1]); } catch (e) { return null; }
+            const frames = [];
+            for (const m of svg.matchAll(/<path\b([^>]*)>/g)) {
+                const a = m[1];
+                if (!/data-s="ctx"/.test(a)) continue;
+                const st = (a.match(/stroke="(#[0-9a-fA-F]{6})"/) || [])[1];
+                if (!st || !FRAME_COLORS.includes(st.toLowerCase())) continue;
+                parsePathD((a.match(/\bd="([^"]+)"/) || [])[1] || '').forEach(poly => {
+                    const [f, l] = [poly[0], poly[poly.length - 1]];
+                    if (poly.length > 3 && Math.hypot(f[0] - l[0], f[1] - l[1]) < 0.5) frames.push(poly);
+                });
+            }
+            if (!frames.length) return { hasFrame: false, outside: {} };
+            let tips = {};
+            try { tips = JSON.parse((html.match(/const TIPS\s*=\s*(\{[\s\S]*?\});/) || [])[1] || '{}'); } catch (e) { /* без остриёв считаем по подписи */ }
+            const outside = {};
+            for (const m of svg.matchAll(/<g class="it ld"([^>]*)>([\s\S]*?)<\/g>/g)) {
+                const a = m[1], body = m[2];
+                const pos = (a.match(/data-p="([^"]*)"/) || [])[1];
+                const q = (a.match(/data-q="([^"]*)"/) || [])[1];
+                if (!pos || !q || /data-x="/.test(a)) continue;   // data-x — повторная выноска, в ведомость не входит
+                const qty = parseQty((q.match(/[\d\s]*[.,]?\d+/) || [])[0]);
+                if (qty == null) continue;
+                const ends = [];
+                for (const lm of body.matchAll(/<path class="ln"[^>]*d="([^"]*)"/g)) parsePathD(lm[1]).forEach(pl => { if (pl.length > 1) ends.push(pl[0], pl[pl.length - 1]); });
+                let pts = (tips[pos] || []).filter(t => ends.some(e => Math.abs(t[0] - e[0]) < 0.05 && Math.abs(t[1] - e[1]) < 0.05));
+                if (!pts.length) {
+                    const hb = body.match(/<rect class="hb" x="([-\d.]+)" y="([-\d.]+)" width="([\d.]+)" height="([\d.]+)"/);
+                    if (hb) pts = [[+hb[1] + hb[3] / 2, +hb[2] + hb[4] / 2]];
+                }
+                if (!pts.length) continue;
+                const outShare = pts.filter(pt => !frames.some(f => pointInPoly(pt, f))).length / pts.length;
+                if (outShare > 0) outside[pos] = (outside[pos] || 0) + qty * outShare;
+            }
+            return { hasFrame: true, outside };
+        }
+
         // Ведомости из самой свежей редакции каждого листа. Если один и тот же файл загружен несколько раз
         // под разными названиями, берём его один раз (по одинаковой ведомости), остальные — в skipped.
         async function collectDrawingQuantities(projectId) {
@@ -6176,12 +6246,15 @@
             for (const d of ordered) {
                 const { data: blob, error: dlErr } = await sb.storage.from(DRAWINGS_BUCKET).download(d.file_path);
                 if (dlErr || !blob) continue;
-                const rows = extractDrawingQuantities(await blob.text());
+                const html = await blob.text();
+                const rows = extractDrawingQuantities(html);
                 if (!rows.length) continue;
+                const frame = await drawingFrameExclusions(html);
+                rows.forEach(r => { r.total = r.qty; r.outside = frame?.outside[r.pos] || 0; });
                 const sig = JSON.stringify(rows.map(r => [r.pos, r.name, r.qty]));
                 if (seen.has(sig)) { skipped.push(d.sheet); continue; }
                 seen.add(sig);
-                sheets.push({ drawing: d, rows });
+                sheets.push({ drawing: d, rows, hasFrame: !!frame?.hasFrame, onlyInFrame: !!frame?.hasFrame });
             }
             return { sheets, skipped };
         }
@@ -6194,14 +6267,19 @@
             return '';
         }
 
+        // Штуки — целые, площади и объёмы — до десятых.
+        const roundQty = (n, unit) => /шт|компл/i.test(unit || '') ? Math.round(n) : Math.round(n * 10) / 10;
+
         function buildDrawingItems(sheets) {
             const items = [];
-            sheets.forEach(({ drawing: d, rows, section, revision_date }) => {
+            sheets.forEach(({ drawing: d, rows, section, revision_date, onlyInFrame }) => {
                 const dupNames = new Set(rows.map(r => normName(r.name)).filter((n, i, a) => a.indexOf(n) !== i));
                 rows.forEach(r => items.push({
                     ref: `${d.sheet}#${r.pos || r.name}`,
                     name: dupNames.has(normName(r.name)) && r.pos ? `${r.name}, поз. ${r.pos}` : r.name,
-                    unit: r.unit, qty: r.qty,
+                    unit: r.unit,
+                    qty: onlyInFrame && r.outside ? roundQty(Math.max(0, r.qty - r.outside), r.unit) : r.qty,
+                    total: r.qty, outside: onlyInFrame ? roundQty(r.outside || 0, r.unit) : 0,
                     source: `${d.sheet}${r.pos ? ', поз. ' + r.pos : ''}`,
                     revision_date: revision_date || null,
                     sheet: d.sheet,
@@ -6253,6 +6331,8 @@
                     ${drawingSheets.map((sh, i) => `
                         <div class="border border-slate-200 rounded-lg p-3">
                             <div class="text-sm font-semibold text-slate-800 mb-2"><i class="fa-solid fa-map text-brand-600 mr-1"></i>${escapeHtml(sh.drawing.sheet)} · ${sh.rows.length} поз.</div>
+                            ${sh.hasFrame ? `<label class="flex items-center gap-2 text-sm text-slate-700 mb-2"><input type="checkbox" ${sh.onlyInFrame ? 'checked' : ''} onchange="pendingImport.drawingSheets[${i}].onlyInFrame = this.checked; renderDrawingImportPreview()"> Считать только внутри синей рамки</label>`
+                                : '<div class="text-[11px] text-slate-400 mb-2">Синей рамки на листе не нашлось — берётся вся ведомость.</div>'}
                             <div class="grid grid-cols-2 gap-2">
                                 <div><label class="block text-[11px] font-bold text-slate-600 mb-1">Раздел проекта</label><input data-sheet-section="${i}" class="${inputCls}" value="${escapeHtml(sh.section)}" placeholder="напр. Озеленение" onchange="pendingImport.drawingSheets[${i}].section = this.value.trim(); renderDrawingImportPreview()"></div>
                                 <div><label class="block text-[11px] font-bold text-slate-600 mb-1">Дата редакции</label><input type="date" data-sheet-rev="${i}" class="${inputCls}" value="${sh.revision_date}" onchange="pendingImport.drawingSheets[${i}].revision_date = this.value; renderDrawingImportPreview()"></div>
@@ -6260,6 +6340,7 @@
                         </div>`).join('')}
                     <p class="text-[11px] text-slate-400">Раздел и дата сохранятся и у самого листа в «Чертежах».</p>
                 </div>
+                ${items.some(it => it.outside) ? `<div class="bg-violet-50 border border-violet-200 rounded-lg px-3 py-2 text-sm text-violet-800 mb-3">За синей рамкой и не учитываются: ${items.filter(it => it.outside).map(it => `${escapeHtml(it.name.split(' (')[0])} — ${fmtQty(it.outside)} ${escapeHtml(it.unit)}`).join('; ')}.</div>` : ''}
                 <p class="text-sm text-slate-500 mb-3">Позиций: <b>${items.length}</b>. Новых: <b>${added}</b>, изменится объём: <b>${changed}</b>${gone.length ? `, исчезли из чертежа: <b>${gone.length}</b> (объём станет 0)` : ''}.</p>
                 ${duplicates.length ? `<div class="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-sm text-amber-800 mb-3">Найдено повторов: <b>${duplicates.length}</b> (лист был загружен или посчитан несколько раз). Повторы будут удалены, останется по одной строке на позицию.</div>` : ''}
                 <div class="border border-slate-200 rounded-lg divide-y divide-slate-100 mb-3">
@@ -6267,7 +6348,7 @@
                         const was = it.existing ? Number(it.existing.design_qty) : null;
                         const tag = was == null ? '<span class="text-[11px] text-emerald-600 font-semibold">новый</span>'
                             : was !== it.qty ? `<span class="text-[11px] text-amber-600 font-semibold">было ${fmtQty(was)}</span>` : '<span class="text-[11px] text-slate-400">без изменений</span>';
-                        return `<div class="px-3 py-2 flex justify-between gap-3 text-sm"><span><span class="text-slate-800">${escapeHtml(it.name)}</span><br><span class="text-[11px] text-slate-400">${escapeHtml([it.section, it.category, it.source].filter(Boolean).join(' · '))}</span></span><span class="flex-shrink-0 text-right"><b>${fmtQty(it.qty)} ${escapeHtml(it.unit)}</b><br>${tag}</span></div>`;
+                        return `<div class="px-3 py-2 flex justify-between gap-3 text-sm"><span><span class="text-slate-800">${escapeHtml(it.name)}</span><br><span class="text-[11px] text-slate-400">${escapeHtml([it.section, it.category, it.source].filter(Boolean).join(' · '))}</span>${it.outside ? `<br><span class="text-[11px] text-violet-600">в ведомости ${fmtQty(it.total)}, за синей рамкой ${fmtQty(it.outside)} — не учитываются</span>` : ''}</span><span class="flex-shrink-0 text-right"><b>${fmtQty(it.qty)} ${escapeHtml(it.unit)}</b><br>${tag}</span></div>`;
                     }).join('')}
                     ${gone.map(m => `<div class="px-3 py-2 flex justify-between gap-3 text-sm bg-rose-50/50"><span>${escapeHtml(m.name)}<br><span class="text-[11px] text-slate-400">${escapeHtml(m.source || '')}</span></span><span class="flex-shrink-0 text-right"><b>0 ${escapeHtml(m.unit)}</b><br><span class="text-[11px] text-rose-600 font-semibold">было ${fmtQty(m.design_qty)}, нет в чертеже</span></span></div>`).join('')}
                 </div>

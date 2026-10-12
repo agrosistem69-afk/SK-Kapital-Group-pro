@@ -5,7 +5,7 @@
 // При каждом обновлении файлов сайта меняйте CACHE_NAME (например, v2, v3...),
 // чтобы у пользователей автоматически подтянулась новая версия.
 
-const CACHE_NAME = 'workcontrol-cache-v13';
+const CACHE_NAME = 'workcontrol-cache-v14';
 const PRECACHE_URLS = [
     './',
     './index.html',
