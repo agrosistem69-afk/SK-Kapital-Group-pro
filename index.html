@@ -5829,7 +5829,7 @@
                 </form>`);
         }
 
-        async function saveMaterial(e, materialId) {
+        async function saveMaterial_(e, materialId) {
             e.preventDefault();
             const qty = parseQty(document.getElementById('matQty').value);
             const errEl = document.getElementById('matError');
@@ -5887,7 +5887,7 @@
             if (!volumesState.materials.length) document.getElementById('delError').textContent = 'Сначала нужны проектные объёмы: материалов пока нет.', document.getElementById('delError').classList.remove('hidden');
         }
 
-        async function saveManualDelivery(e) {
+        async function saveManualDelivery_(e) {
             e.preventDefault();
             const errEl = document.getElementById('delError');
             const qty = parseQty(document.getElementById('delQty').value);
@@ -6074,7 +6074,7 @@
                 <div class="flex justify-end"><button onclick="saveDeliveryImport()" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-5 py-2 rounded-lg">Сохранить строки (${parsed.lines.length})</button></div>`);
         }
 
-        async function saveDeliveryImport() {
+        async function saveDeliveryImport_() {
             if (!pendingImport) return;
             const errEl = document.getElementById('impError');
             const num = document.getElementById('impNum')?.value.trim() || '';
@@ -6125,7 +6125,7 @@
                 </div>`);
         }
 
-        async function assignDelivery(deliveryId, materialId) {
+        async function assignDelivery_(deliveryId, materialId) {
             if (!materialId) return;
             const d = volumesState.deliveries.find(x => x.id === deliveryId);
             const { error } = await sb.from('material_deliveries').update({ material_id: materialId }).eq('id', deliveryId);
@@ -6158,10 +6158,11 @@
             } catch (e) { return []; }
         }
 
+        // Ведомости из самой свежей редакции каждого листа. Если один и тот же файл загружен несколько раз
+        // под разными названиями, берём его один раз (по одинаковой ведомости), остальные — в skipped.
         async function collectDrawingQuantities(projectId) {
             const { data: drawings, error } = await sb.from('drawings').select('*').eq('project_id', projectId);
             if (error) throw error;
-            // Из нескольких редакций одного листа берём самую свежую.
             const latest = {};
             (drawings || []).forEach(d => {
                 const key = normName(d.sheet);
@@ -6170,23 +6171,44 @@
                     || ((d.revision_date || '') === (cur.revision_date || '') && d.updated_at > cur.updated_at);
                 if (newer) latest[key] = d;
             });
-            const items = [];
-            for (const d of Object.values(latest)) {
+            const ordered = Object.values(latest).sort((x, y) => (y.revision_date || '').localeCompare(x.revision_date || '') || (y.updated_at || '').localeCompare(x.updated_at || ''));
+            const sheets = [], skipped = [], seen = new Set();
+            for (const d of ordered) {
                 const { data: blob, error: dlErr } = await sb.storage.from(DRAWINGS_BUCKET).download(d.file_path);
                 if (dlErr || !blob) continue;
                 const rows = extractDrawingQuantities(await blob.text());
+                if (!rows.length) continue;
+                const sig = JSON.stringify(rows.map(r => [r.pos, r.name, r.qty]));
+                if (seen.has(sig)) { skipped.push(d.sheet); continue; }
+                seen.add(sig);
+                sheets.push({ drawing: d, rows });
+            }
+            return { sheets, skipped };
+        }
+
+        // Если у листа не указан раздел, подсказываем по группам ведомости.
+        function guessSection(rows) {
+            const cats = rows.map(r => r.category || '').join(' ');
+            if (/дерев|кустарн|газон|цветник|многолетн|лиан|травян|хвойн/i.test(cats)) return 'Озеленение';
+            if (/покрыт|плитк|бортов|асфальт/i.test(cats)) return 'Покрытия';
+            return '';
+        }
+
+        function buildDrawingItems(sheets) {
+            const items = [];
+            sheets.forEach(({ drawing: d, rows, section, revision_date }) => {
                 const dupNames = new Set(rows.map(r => normName(r.name)).filter((n, i, a) => a.indexOf(n) !== i));
                 rows.forEach(r => items.push({
                     ref: `${d.sheet}#${r.pos || r.name}`,
                     name: dupNames.has(normName(r.name)) && r.pos ? `${r.name}, поз. ${r.pos}` : r.name,
                     unit: r.unit, qty: r.qty,
                     source: `${d.sheet}${r.pos ? ', поз. ' + r.pos : ''}`,
-                    revision_date: d.revision_date,
+                    revision_date: revision_date || null,
                     sheet: d.sheet,
-                    section: r.section || d.section || '',
+                    section: r.section || section || '',
                     category: r.category || '',
                 }));
-            }
+            });
             return items;
         }
 
@@ -6194,63 +6216,120 @@
             const projectId = volumesState.projectId;
             if (!projectId) return;
             showVolumesModal('Объёмы из чертежей', '<div class="text-sm text-slate-500">Читаю ведомости в чертежах проекта...</div>');
-            let items;
-            try { items = await collectDrawingQuantities(projectId); }
+            let found;
+            try { found = await collectDrawingQuantities(projectId); }
             catch (e) { document.getElementById('volumesModalBody').innerHTML = `<div class="text-sm text-rose-600">Не удалось прочитать чертежи: ${escapeHtml(e.message)}</div>`; return; }
-            if (!items.length) {
+            if (!found.sheets.length) {
                 document.getElementById('volumesModalBody').innerHTML = '<div class="text-sm text-slate-500">В чертежах этого проекта не нашлось ведомостей с количествами.</div>';
                 return;
             }
+            found.sheets.forEach(sh => {
+                sh.section = sh.drawing.section || guessSection(sh.rows);
+                sh.revision_date = sh.drawing.revision_date || '';
+            });
+            pendingImport = { drawingSheets: found.sheets, skipped: found.skipped };
+            renderDrawingImportPreview();
+        }
+
+        function renderDrawingImportPreview() {
+            const { drawingSheets, skipped } = pendingImport;
+            const items = buildDrawingItems(drawingSheets);
             items.forEach(it => {
                 it.existing = volumesState.materials.find(m => m.drawing_ref === it.ref)
                     || volumesState.materials.find(m => !m.drawing_ref && normName(m.name) === normName(it.name));
             });
-            const sheets = new Set(items.map(it => it.sheet));
-            const gone = volumesState.materials.filter(m => m.drawing_ref && sheets.has(m.drawing_ref.split('#')[0])
-                && !items.some(it => it.ref === m.drawing_ref) && Number(m.design_qty) !== 0);
-            pendingImport = { fromDrawings: items, gone };
-            const noDate = [...new Set(items.filter(it => !it.revision_date).map(it => it.sheet))];
+            const sheetNames = new Set(drawingSheets.map(sh => sh.drawing.sheet));
+            const usedIds = new Set(items.map(it => it.existing?.id).filter(Boolean));
+            // Лишние копии: материал из того же листа и позиции, что уже занят, или из повторно загруженного файла.
+            const duplicates = volumesState.materials.filter(m => m.drawing_ref && !usedIds.has(m.id)
+                && (items.some(it => it.ref === m.drawing_ref) || skipped.includes(m.drawing_ref.split('#')[0])));
+            const gone = volumesState.materials.filter(m => m.drawing_ref && !usedIds.has(m.id) && !duplicates.includes(m)
+                && sheetNames.has(m.drawing_ref.split('#')[0]) && Number(m.design_qty) !== 0);
+            Object.assign(pendingImport, { items, duplicates, gone });
             const added = items.filter(it => !it.existing).length;
-            const changed = items.filter(it => it.existing && Number(it.existing.design_qty) !== it.qty).length;
+            const changed = items.filter(it => it.existing && (Number(it.existing.design_qty) !== it.qty)).length;
             document.getElementById('volumesModalBody').innerHTML = `
-                <p class="text-sm text-slate-500 mb-3">Листов: <b>${sheets.size}</b>, позиций: <b>${items.length}</b>. Новых: <b>${added}</b>, изменится объём: <b>${changed}</b>${gone.length ? `, исчезли из чертежа: <b>${gone.length}</b> (объём станет 0)` : ''}.</p>
-                ${noDate.length ? `<div class="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-sm text-amber-800 mb-3">У листов ${noDate.map(escapeHtml).join(', ')} не указана дата редакции. Объёмы сохранятся без даты; дату можно поставить карандашом в «Чертежах».</div>` : ''}
+                <div class="space-y-3 mb-4">
+                    ${drawingSheets.map((sh, i) => `
+                        <div class="border border-slate-200 rounded-lg p-3">
+                            <div class="text-sm font-semibold text-slate-800 mb-2"><i class="fa-solid fa-map text-brand-600 mr-1"></i>${escapeHtml(sh.drawing.sheet)} · ${sh.rows.length} поз.</div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div><label class="block text-[11px] font-bold text-slate-600 mb-1">Раздел проекта</label><input data-sheet-section="${i}" class="${inputCls}" value="${escapeHtml(sh.section)}" placeholder="напр. Озеленение" onchange="pendingImport.drawingSheets[${i}].section = this.value.trim(); renderDrawingImportPreview()"></div>
+                                <div><label class="block text-[11px] font-bold text-slate-600 mb-1">Дата редакции</label><input type="date" data-sheet-rev="${i}" class="${inputCls}" value="${sh.revision_date}" onchange="pendingImport.drawingSheets[${i}].revision_date = this.value; renderDrawingImportPreview()"></div>
+                            </div>
+                        </div>`).join('')}
+                    <p class="text-[11px] text-slate-400">Раздел и дата сохранятся и у самого листа в «Чертежах».</p>
+                </div>
+                <p class="text-sm text-slate-500 mb-3">Позиций: <b>${items.length}</b>. Новых: <b>${added}</b>, изменится объём: <b>${changed}</b>${gone.length ? `, исчезли из чертежа: <b>${gone.length}</b> (объём станет 0)` : ''}.</p>
+                ${duplicates.length ? `<div class="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-sm text-amber-800 mb-3">Найдено повторов: <b>${duplicates.length}</b> (лист был загружен или посчитан несколько раз). Повторы будут удалены, останется по одной строке на позицию.</div>` : ''}
                 <div class="border border-slate-200 rounded-lg divide-y divide-slate-100 mb-3">
                     ${items.map(it => {
                         const was = it.existing ? Number(it.existing.design_qty) : null;
                         const tag = was == null ? '<span class="text-[11px] text-emerald-600 font-semibold">новый</span>'
                             : was !== it.qty ? `<span class="text-[11px] text-amber-600 font-semibold">было ${fmtQty(was)}</span>` : '<span class="text-[11px] text-slate-400">без изменений</span>';
-                        return `<div class="px-3 py-2 flex justify-between gap-3 text-sm"><span><span class="text-slate-800">${escapeHtml(it.name)}</span><br><span class="text-[11px] text-slate-400">${escapeHtml(it.source)}</span></span><span class="flex-shrink-0 text-right"><b>${fmtQty(it.qty)} ${escapeHtml(it.unit)}</b><br>${tag}</span></div>`;
+                        return `<div class="px-3 py-2 flex justify-between gap-3 text-sm"><span><span class="text-slate-800">${escapeHtml(it.name)}</span><br><span class="text-[11px] text-slate-400">${escapeHtml([it.section, it.category, it.source].filter(Boolean).join(' · '))}</span></span><span class="flex-shrink-0 text-right"><b>${fmtQty(it.qty)} ${escapeHtml(it.unit)}</b><br>${tag}</span></div>`;
                     }).join('')}
                     ${gone.map(m => `<div class="px-3 py-2 flex justify-between gap-3 text-sm bg-rose-50/50"><span>${escapeHtml(m.name)}<br><span class="text-[11px] text-slate-400">${escapeHtml(m.source || '')}</span></span><span class="flex-shrink-0 text-right"><b>0 ${escapeHtml(m.unit)}</b><br><span class="text-[11px] text-rose-600 font-semibold">было ${fmtQty(m.design_qty)}, нет в чертеже</span></span></div>`).join('')}
                 </div>
                 <div id="fromDrawingsError" class="hidden text-sm text-rose-600 mb-2"></div>
-                <div class="flex justify-end"><button onclick="saveVolumesFromDrawings()" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-5 py-2 rounded-lg">Обновить объёмы</button></div>`;
+                <div class="flex justify-end"><button id="fromDrawingsSaveBtn" onclick="saveVolumesFromDrawings()" class="bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-semibold px-5 py-2 rounded-lg">Обновить объёмы</button></div>`;
         }
 
-        async function saveVolumesFromDrawings() {
-            const items = pendingImport?.fromDrawings;
-            if (!items) return;
+        async function saveVolumesFromDrawings_() {
+            const btn = document.getElementById('fromDrawingsSaveBtn');
+            if (!pendingImport?.items || btn.disabled) return;   // повторное нажатие во время сохранения ничего не делает
+            btn.disabled = true;
+            btn.textContent = 'Сохраняю...';
+            const { items, duplicates, gone, drawingSheets } = pendingImport;
             const errEl = document.getElementById('fromDrawingsError');
-            for (const it of items) {
-                const row = { project_id: volumesState.projectId, name: it.name, unit: it.unit || 'шт', design_qty: it.qty, revision_date: it.revision_date || null, source: it.source, drawing_ref: it.ref, section: it.section || null, category: it.category || null };
-                const ex = it.existing;
-                const same = ex && Number(ex.design_qty) === it.qty && ex.revision_date === row.revision_date && ex.drawing_ref === it.ref
-                    && (ex.section || null) === row.section && (ex.category || null) === row.category;
-                const { error } = same ? { error: null } : ex
-                    ? await sb.from('materials').update(row).eq('id', ex.id)
-                    : await sb.from('materials').insert(row);
-                if (error) { errEl.textContent = `${it.name}: ${error.message}`; errEl.classList.remove('hidden'); await renderVolumes(); return; }
+            const fail = async msg => { errEl.textContent = msg; errEl.classList.remove('hidden'); btn.disabled = false; btn.textContent = 'Обновить объёмы'; await renderVolumes(); };
+
+            // Раздел и дату редакции записываем и самому листу.
+            for (const sh of drawingSheets) {
+                const patch = {};
+                if ((sh.section || null) !== (sh.drawing.section || null)) patch.section = sh.section || '';
+                if ((sh.revision_date || null) !== (sh.drawing.revision_date || null)) patch.revision_date = sh.revision_date || null;
+                if (Object.keys(patch).length) {
+                    const { error } = await sb.from('drawings').update(patch).eq('id', sh.drawing.id);
+                    if (error) return fail('Лист ' + sh.drawing.sheet + ': ' + error.message);
+                }
             }
+            if (duplicates.length) {
+                const { error } = await sb.from('materials').delete().in('id', duplicates.map(m => m.id));
+                if (error) return fail('Повторы: ' + error.message);
+            }
+            const toRow = it => ({ project_id: volumesState.projectId, name: it.name, unit: it.unit || 'шт', design_qty: it.qty, revision_date: it.revision_date || null, source: it.source, drawing_ref: it.ref, section: it.section || null, category: it.category || null });
+            const fresh = items.filter(it => !it.existing).map(toRow);
+            if (fresh.length) {
+                const { error } = await sb.from('materials').insert(fresh);
+                if (error) return fail(error.message);
+            }
+            const updates = items.filter(it => {
+                const ex = it.existing, row = toRow(it);
+                return ex && !(Number(ex.design_qty) === it.qty && ex.revision_date === row.revision_date && ex.drawing_ref === it.ref
+                    && (ex.section || null) === row.section && (ex.category || null) === row.category && ex.name === row.name);
+            });
+            const results = await Promise.all(updates.map(it => sb.from('materials').update(toRow(it)).eq('id', it.existing.id)));
+            const upErr = results.find(r => r.error);
+            if (upErr) return fail(upErr.error.message);
             // Позиция пропала из новой редакции листа: объём 0 с датой этой редакции, чтобы в истории было видно, когда.
-            for (const m of pendingImport.gone) {
-                const sheetItem = items.find(it => it.sheet === m.drawing_ref.split('#')[0]);
-                await sb.from('materials').update({ design_qty: 0, revision_date: sheetItem?.revision_date || m.revision_date }).eq('id', m.id);
-            }
+            await Promise.all(gone.map(m => {
+                const sh = drawingSheets.find(x => x.drawing.sheet === m.drawing_ref.split('#')[0]);
+                return sb.from('materials').update({ design_qty: 0, revision_date: sh?.revision_date || m.revision_date }).eq('id', m.id);
+            }));
             pendingImport = null;
             closeModal('volumesModal');
             await renderVolumes();
         }
+
+        // Защита от двойного нажатия: пока идёт сохранение, повторные нажатия ничего не делают.
+        let volumesSaving = false;
+        async function saveDeliveryImport(...args) { if (volumesSaving) return; volumesSaving = true; try { return await saveDeliveryImport_(...args); } finally { volumesSaving = false; } }
+        async function saveDesignImport(...args) { if (volumesSaving) return; volumesSaving = true; try { return await saveDesignImport_(...args); } finally { volumesSaving = false; } }
+        async function saveMaterial(...args) { if (volumesSaving) return; volumesSaving = true; try { return await saveMaterial_(...args); } finally { volumesSaving = false; } }
+        async function saveManualDelivery(...args) { if (volumesSaving) return; volumesSaving = true; try { return await saveManualDelivery_(...args); } finally { volumesSaving = false; } }
+        async function saveVolumesFromDrawings(...args) { if (volumesSaving) return; volumesSaving = true; try { return await saveVolumesFromDrawings_(...args); } finally { volumesSaving = false; } }
+        async function assignDelivery(...args) { if (volumesSaving) return; volumesSaving = true; try { return await assignDelivery_(...args); } finally { volumesSaving = false; } }
 
         // ---- История объёмов: что было в каждой редакции проекта и что менялось ----
         let volumesHistory = null;
@@ -6394,7 +6473,7 @@
                 <div class="flex justify-end"><button onclick="saveDesignImport()" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-5 py-2 rounded-lg">Сохранить</button></div>`);
         }
 
-        async function saveDesignImport() {
+        async function saveDesignImport_() {
             const items = pendingImport?.design;
             if (!items) return;
             const errEl = document.getElementById('designError');
