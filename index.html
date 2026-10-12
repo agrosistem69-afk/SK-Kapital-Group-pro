@@ -276,6 +276,7 @@
             </div>
             <input type="file" id="deliveryImportFile" accept=".xml,.xlsx,.xls,.csv" class="hidden" onchange="handleDeliveryFile(this)">
             <input type="file" id="designImportFile" accept=".xlsx,.xls,.csv" class="hidden" onchange="handleDesignFile(this)">
+            <button onclick="openVolumesHistory()" class="mb-4 text-sm text-brand-600 hover:text-brand-700 font-semibold flex items-center gap-1.5"><i class="fa-solid fa-clock-rotate-left"></i> История объёмов и редакций</button>
             <div id="volumesSummary" class="mb-4"></div>
             <div id="volumesUnmatched" class="mb-4"></div>
             <div id="volumesList" class="space-y-2"></div>
@@ -6199,12 +6200,109 @@
                     : await sb.from('materials').insert(row);
                 if (error) { errEl.textContent = `${it.name}: ${error.message}`; errEl.classList.remove('hidden'); await renderVolumes(); return; }
             }
+            // Позиция пропала из новой редакции листа: объём 0 с датой этой редакции, чтобы в истории было видно, когда.
             for (const m of pendingImport.gone) {
-                await sb.from('materials').update({ design_qty: 0 }).eq('id', m.id);
+                const sheetItem = items.find(it => it.sheet === m.drawing_ref.split('#')[0]);
+                await sb.from('materials').update({ design_qty: 0, revision_date: sheetItem?.revision_date || m.revision_date }).eq('id', m.id);
             }
             pendingImport = null;
             closeModal('volumesModal');
             await renderVolumes();
+        }
+
+        // ---- История объёмов: что было в каждой редакции проекта и что менялось ----
+        let volumesHistory = null;
+        const revKey = d => d || 'без даты';
+        const revLabel = d => d ? `Проект от ${fmtDate(d)}` : 'Без даты редакции';
+
+        async function openVolumesHistory() {
+            const projectId = volumesState.projectId;
+            if (!projectId) return;
+            showVolumesModal('История объёмов', '<div class="text-sm text-slate-500">Загрузка...</div>');
+            const [logRes, drRes] = await Promise.all([
+                sb.from('material_design_log').select('*').eq('project_id', projectId).order('changed_at'),
+                sb.from('drawings').select('*').eq('project_id', projectId),
+            ]);
+            if (logRes.error) { document.getElementById('volumesModalBody').innerHTML = `<div class="text-sm text-rose-600">${escapeHtml(logRes.error.message)}</div>`; return; }
+            const log = (logRes.data || []).map(l => ({ ...l, key: l.material_id || ('удалён:' + l.material_name) }));
+            // Удалённый материал продолжает свою историю под прежним ключом.
+            log.forEach(l => {
+                if (!l.material_id) {
+                    const prev = [...log].reverse().find(x => x.material_id && x.material_name === l.material_name && x.changed_at <= l.changed_at);
+                    if (prev) l.key = prev.material_id;
+                }
+            });
+            const revisions = [...new Set(log.map(l => revKey(l.revision_date)))].sort((a, b) => a === 'без даты' ? -1 : b === 'без даты' ? 1 : a.localeCompare(b));
+            volumesHistory = { log, revisions, drawings: drRes.data || [] };
+            renderVolumesHistory(revisions[revisions.length - 2] || revisions[0], revisions[revisions.length - 1], true);
+        }
+
+        // Объёмы «на редакцию»: по каждому материалу последняя запись, сделанная в этой редакции или раньше.
+        function volumesSnapshot(rev) {
+            const { log, revisions } = volumesHistory;
+            const upto = revisions.indexOf(rev);
+            const snap = {};
+            log.filter(l => revisions.indexOf(revKey(l.revision_date)) <= upto)
+                .sort((a, b) => revisions.indexOf(revKey(a.revision_date)) - revisions.indexOf(revKey(b.revision_date)) || a.changed_at.localeCompare(b.changed_at))
+                .forEach(l => { snap[l.key] = { name: l.material_name || '', unit: l.unit || '', qty: Number(l.new_qty) }; });
+            return snap;
+        }
+
+        function renderVolumesHistory(revA, revB, onlyChanges) {
+            const { log, revisions, drawings } = volumesHistory;
+            if (!revisions.length) {
+                document.getElementById('volumesModalBody').innerHTML = '<div class="text-sm text-slate-500">История пока пустая: объёмы ещё не вносились.</div>';
+                return;
+            }
+            const a = volumesSnapshot(revA), b = volumesSnapshot(revB);
+            const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])];
+            const rows = keys.map(k => {
+                const qa = a[k]?.qty ?? 0, qb = b[k]?.qty ?? 0;
+                return { name: (b[k] || a[k]).name, unit: (b[k] || a[k]).unit, qa, qb, delta: qb - qa };
+            }).filter(r => !onlyChanges || r.delta !== 0 || revA === revB).sort((x, y) => x.name.localeCompare(y.name, 'ru'));
+            const opts = sel => revisions.map(r => `<option value="${r}" ${r === sel ? 'selected' : ''}>${r === 'без даты' ? 'Без даты' : 'от ' + fmtDate(r)}</option>`).join('');
+            const deltaHtml = d => d === 0 ? '<span class="text-slate-400">—</span>' : `<span class="${d > 0 ? 'text-emerald-600' : 'text-rose-600'} font-semibold">${d > 0 ? '+' : '−'}${fmtQty(Math.abs(d))}</span>`;
+
+            // Хронология: по каждой редакции — какие листы и что изменилось.
+            const timeline = [...revisions].reverse().map(rev => {
+                const entries = log.filter(l => revKey(l.revision_date) === rev);
+                const sheets = drawings.filter(d => revKey(d.revision_date) === rev).map(d => d.sheet);
+                const added = entries.filter(l => l.old_qty == null).length;
+                const changed = entries.filter(l => l.old_qty != null && Number(l.old_qty) !== Number(l.new_qty));
+                return `
+                    <details class="border border-slate-200 rounded-lg">
+                        <summary class="px-3 py-2 cursor-pointer text-sm flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <b class="text-slate-900">${revLabel(rev === 'без даты' ? null : rev)}</b>
+                            <span class="text-slate-500 text-xs">${[added ? `добавлено ${added}` : '', changed.length ? `изменено ${changed.length}` : ''].filter(Boolean).join(', ') || 'без изменений объёмов'}</span>
+                        </summary>
+                        <div class="px-3 pb-3 text-sm space-y-1">
+                            ${sheets.length ? `<div class="text-xs text-slate-500"><i class="fa-solid fa-map mr-1"></i>Листы: ${sheets.map(escapeHtml).join(', ')}</div>` : ''}
+                            ${changed.map(l => `<div>${escapeHtml(l.material_name || '')}: ${fmtQty(l.old_qty)} → <b>${fmtQty(l.new_qty)}</b> ${escapeHtml(l.unit || '')}${l.source === 'материал удалён' ? ' <span class="text-rose-600 text-xs">(удалён)</span>' : ''}</div>`).join('')}
+                            ${added ? `<div class="text-xs text-slate-500">Новые позиции: ${entries.filter(l => l.old_qty == null).map(l => escapeHtml(l.material_name || '')).join(', ')}</div>` : ''}
+                        </div>
+                    </details>`;
+            }).join('');
+
+            document.getElementById('volumesModalBody').innerHTML = `
+                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Сравнить редакции</h4>
+                <div class="grid grid-cols-2 gap-2 mb-2">
+                    <select id="histRevA" class="${inputCls}" onchange="renderVolumesHistory(this.value, document.getElementById('histRevB').value, document.getElementById('histOnly').checked)">${opts(revA)}</select>
+                    <select id="histRevB" class="${inputCls}" onchange="renderVolumesHistory(document.getElementById('histRevA').value, this.value, document.getElementById('histOnly').checked)">${opts(revB)}</select>
+                </div>
+                <label class="flex items-center gap-2 text-sm text-slate-600 mb-3"><input type="checkbox" id="histOnly" ${onlyChanges ? 'checked' : ''} onchange="renderVolumesHistory(document.getElementById('histRevA').value, document.getElementById('histRevB').value, this.checked)"> Только изменившиеся позиции</label>
+                <div class="border border-slate-200 rounded-lg overflow-x-auto mb-5">
+                    <table class="w-full text-sm">
+                        <thead class="bg-slate-50 text-[11px] text-slate-500 uppercase"><tr>
+                            <th class="text-left px-3 py-2">Материал</th><th class="text-right px-2 py-2">${revA === 'без даты' ? 'Без даты' : fmtDate(revA)}</th><th class="text-right px-2 py-2">${revB === 'без даты' ? 'Без даты' : fmtDate(revB)}</th><th class="text-right px-3 py-2">Разница</th>
+                        </tr></thead>
+                        <tbody class="divide-y divide-slate-100">
+                            ${rows.map(r => `<tr><td class="px-3 py-2">${escapeHtml(r.name)} <span class="text-[11px] text-slate-400">${escapeHtml(r.unit)}</span></td><td class="text-right px-2 py-2">${fmtQty(r.qa)}</td><td class="text-right px-2 py-2 font-semibold">${fmtQty(r.qb)}</td><td class="text-right px-3 py-2">${deltaHtml(r.delta)}</td></tr>`).join('')
+                              || '<tr><td colspan="4" class="px-3 py-3 text-slate-400">Между этими редакциями объёмы не менялись</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Хронология</h4>
+                <div class="space-y-2">${timeline}</div>`;
         }
 
         // ---- Ведомость проектных объёмов из Excel (только администратор чертежей) ----

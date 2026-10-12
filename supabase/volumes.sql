@@ -21,10 +21,14 @@ create table if not exists public.materials (
 alter table public.materials add column if not exists drawing_ref text;
 create index if not exists materials_project_idx on public.materials(project_id);
 
--- 2. История корректировок проектного объёма (заполняется автоматически).
+-- 2. История проектных объёмов (заполняется автоматически). Хранит название и проект сама,
+--    поэтому хронология сохраняется, даже если материал потом удалят.
 create table if not exists public.material_design_log (
     id            uuid primary key default gen_random_uuid(),
-    material_id   uuid not null references public.materials(id) on delete cascade,
+    material_id   uuid references public.materials(id) on delete set null,
+    project_id    uuid references public.projects(id) on delete cascade,
+    material_name text,
+    unit          text,
     old_qty       numeric,
     new_qty       numeric not null,
     revision_date date,
@@ -32,7 +36,12 @@ create table if not exists public.material_design_log (
     changed_by    uuid default auth.uid(),
     changed_at    timestamptz not null default now()
 );
+alter table public.material_design_log alter column material_id drop not null;
+alter table public.material_design_log add column if not exists project_id uuid references public.projects(id) on delete cascade;
+alter table public.material_design_log add column if not exists material_name text;
+alter table public.material_design_log add column if not exists unit text;
 create index if not exists material_design_log_material_idx on public.material_design_log(material_id);
+create index if not exists material_design_log_project_idx on public.material_design_log(project_id);
 
 -- 3. Поставки: строки накладных/УПД. material_id пустой, пока строку не сопоставили с материалом.
 create table if not exists public.material_deliveries (
@@ -68,17 +77,23 @@ security definer
 set search_path = public
 as $$
 begin
-    if tg_op = 'INSERT' or new.design_qty is distinct from old.design_qty
+    if tg_op = 'DELETE' then
+        -- удалённый материал: в истории остаётся запись «объём стал 0» (если не удаляют весь проект)
+        if not exists (select 1 from projects where id = old.project_id) then return null; end if;
+        insert into material_design_log (material_id, project_id, material_name, unit, old_qty, new_qty, revision_date, source)
+        values (null, old.project_id, old.name, old.unit, old.design_qty, 0, old.revision_date, 'материал удалён');
+    elsif tg_op = 'INSERT' or new.design_qty is distinct from old.design_qty
        or new.revision_date is distinct from old.revision_date then
-        insert into material_design_log (material_id, old_qty, new_qty, revision_date, source)
-        values (new.id, case when tg_op = 'UPDATE' then old.design_qty end, new.design_qty, new.revision_date, new.source);
+        insert into material_design_log (material_id, project_id, material_name, unit, old_qty, new_qty, revision_date, source)
+        values (new.id, new.project_id, new.name, new.unit,
+                case when tg_op = 'UPDATE' then old.design_qty end, new.design_qty, new.revision_date, new.source);
     end if;
     return null;
 end;
 $$;
 drop trigger if exists materials_design_log on public.materials;
 create trigger materials_design_log
-    after insert or update on public.materials
+    after insert or update or delete on public.materials
     for each row execute function public.log_material_design();
 
 create or replace function public.touch_material()
@@ -136,7 +151,7 @@ create policy "materials_write" on public.materials
 drop policy if exists "material_design_log_select" on public.material_design_log;
 create policy "material_design_log_select" on public.material_design_log
     for select to authenticated
-    using (exists (select 1 from materials m where m.id = material_id and public.can_view_volumes(m.project_id)));
+    using (public.can_view_volumes(project_id));
 
 drop policy if exists "material_deliveries_select" on public.material_deliveries;
 create policy "material_deliveries_select" on public.material_deliveries
