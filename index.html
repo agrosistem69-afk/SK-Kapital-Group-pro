@@ -7023,21 +7023,53 @@
             zonesRender();
         }
 
+        // Площадь участка, м². У газона и других позиций в м² площадь — само количество из выноски.
+        // Для остальных закрашиваем на невидимом холсте фигуры, на которые указывает стрелка (повторы
+        // одной и той же фигуры — один раз), и считаем закрашенные точки.
+        function parcelArea(pr, unit) {
+            if (/м2|м²|кв\.?\s*м/i.test(unit || '')) return pr.qty;
+            if (pr.area != null) return pr.area;
+            const tipEls = pr.els.filter(g => g.dataset.src === 'tip');
+            const els = tipEls.length ? tipEls : pr.els;
+            const seen = new Set(), paths = [];
+            els.forEach(g => g.querySelectorAll('path').forEach(pa => {
+                const d = pa.getAttribute('d');
+                if (!d || seen.has(d)) return;
+                seen.add(d);
+                paths.push({ d, b: pa.getBBox() });
+            }));
+            pr.area = 0;
+            if (!paths.length || typeof OffscreenCanvas === 'undefined') return pr.area;
+            const x0 = Math.min(...paths.map(p => p.b.x)), y0 = Math.min(...paths.map(p => p.b.y));
+            const x1 = Math.max(...paths.map(p => p.b.x + p.b.width)), y1 = Math.max(...paths.map(p => p.b.y + p.b.height));
+            const res = Math.max(0.05, Math.sqrt((x1 - x0) * (y1 - y0) / 4e6));   // не больше ~4 млн точек
+            const W = Math.max(1, Math.ceil((x1 - x0) / res)), H = Math.max(1, Math.ceil((y1 - y0) / res));
+            const ctx = new OffscreenCanvas(W, H).getContext('2d');
+            ctx.setTransform(1 / res, 0, 0, 1 / res, -x0 / res, -y0 / res);
+            paths.forEach(p => ctx.fill(new Path2D(p.d)));
+            const px = ctx.getImageData(0, 0, W, H).data;
+            let n = 0;
+            for (let i = 3; i < px.length; i += 4) if (px[i] > 127) n++;
+            pr.area = n * res * res * zonesAreaFactor();
+            return pr.area;
+        }
+
         function zonesPickedRows() {
-            const st = zonesState, sum = {}, count = {};
+            const st = zonesState, sum = {}, count = {}, area = {};
+            const info = {};
+            st.rows.forEach(r => { if (r.pos && !info[r.pos]) info[r.pos] = r; });
             st.picked.forEach(k => {
                 const pr = st.parcels.get(k);
                 if (!pr) return;
                 sum[pr.pos] = (sum[pr.pos] || 0) + pr.qty;
                 count[pr.pos] = (count[pr.pos] || 0) + 1;
+                area[pr.pos] = (area[pr.pos] || 0) + parcelArea(pr, info[pr.pos]?.unit);
             });
-            const info = {};
-            st.rows.forEach(r => { if (r.pos && !info[r.pos]) info[r.pos] = r; });
             const order = st.rows.map(r => r.pos).filter((p, i, a) => p && a.indexOf(p) === i);
             Object.keys(sum).forEach(p => { if (!order.includes(p)) order.push(p); });
             return order.filter(p => sum[p]).map(p => {
                 const r = info[p] || { name: `Позиция ${p}`, unit: '' };
-                return { pos: p, name: r.name, unit: r.unit, qty: roundQty(sum[p], r.unit), parcels: count[p] };
+                return { pos: p, name: r.name, unit: r.unit, qty: roundQty(sum[p], r.unit), parcels: count[p], area: Math.round(area[p] * 10) / 10 };
             });
         }
 
@@ -7053,21 +7085,27 @@
                         <thead><tr class="text-[11px] text-slate-500 text-left border-b border-slate-200">
                             <th class="py-1.5 pr-2 font-medium">Материал</th>
                             <th class="py-1.5 px-2 font-medium text-right">Участков</th>
-                            <th class="py-1.5 pl-2 font-semibold text-right text-slate-700">Сумма</th>
+                            <th class="py-1.5 px-2 font-semibold text-right text-slate-700">Сумма</th>
+                            <th class="py-1.5 pl-2 font-medium text-right whitespace-nowrap">Площадь, м²</th>
                             <th class="w-6"></th>
                         </tr></thead>
                         <tbody class="divide-y divide-slate-100">${rows.map(r => `
                             <tr>
                                 <td class="py-1.5 pr-2 text-slate-800"><span class="text-slate-400">${escapeHtml(r.pos)}.</span> ${escapeHtml(r.name)}</td>
                                 <td class="py-1.5 px-2 text-right text-slate-500">${r.parcels}</td>
-                                <td class="py-1.5 pl-2 text-right font-semibold whitespace-nowrap">${fmtQty(r.qty)} <span class="font-normal text-slate-400">${escapeHtml(r.unit)}</span></td>
+                                <td class="py-1.5 px-2 text-right font-semibold whitespace-nowrap">${fmtQty(r.qty)} <span class="font-normal text-slate-400">${escapeHtml(r.unit)}</span></td>
+                                <td class="py-1.5 pl-2 text-right whitespace-nowrap">${r.area ? fmtQty(r.area) : '—'}</td>
                                 <td class="text-right"><button onclick="zonesUnpickPos('${escapeHtml(r.pos)}')" title="Убрать из выбора" class="w-6 h-6 text-slate-300 hover:text-rose-600"><i class="fa-solid fa-xmark text-xs"></i></button></td>
                             </tr>`).join('')}
                         </tbody>
                     </table>
+                    <div class="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2 mt-2 text-sm">
+                        <span class="font-semibold text-slate-800">Общая площадь выбранных участков</span>
+                        <span class="font-bold text-slate-900 whitespace-nowrap">${fmtQty(Math.round(rows.reduce((t, r) => t + r.area, 0) * 10) / 10)} м²</span>
+                    </div>
                     <button onclick="zonesExportExcel()" class="mt-3 w-full bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold"><i class="fa-solid fa-file-excel mr-1"></i>Скачать в Excel</button>`
                 : '<div class="text-sm text-slate-400">Нажмите на цветник, куст, дерево или газон на плане. Выбранные участки подсветятся оранжевым, а их количество сложится здесь.</div>'}
-                <div class="text-[11px] text-slate-400 mt-4">Участок — это место, на которое указывает выноска с количеством. Количество участка берётся из этой выноски. Нажатие на саму выноску выбирает все её участки.</div>`;
+                <div class="text-[11px] text-slate-400 mt-4">Участок — это место, на которое указывает выноска с количеством. Количество участка берётся из этой выноски. Нажатие на саму выноску выбирает все её участки. Площадь считается по контуру участка на плане, а у газона и других позиций в м² берётся из выноски.</div>`;
         }
 
         async function zonesExportPicked() {
@@ -7075,9 +7113,10 @@
             if (!rows.length) return;
             try { await loadXlsxLib(); } catch (e) { alert(e.message); return; }
             const ws = XLSX.utils.aoa_to_sheet([[st.drawing.sheet], [`Выбрано участков: ${st.picked.size}`], [],
-                ['Поз.', 'Материал', 'Ед.', 'Участков', 'Количество'],
-                ...rows.map(r => [r.pos, r.name, r.unit, r.parcels, r.qty])]);
-            ws['!cols'] = [{ wch: 6 }, { wch: 50 }, { wch: 6 }, { wch: 10 }, { wch: 12 }];
+                ['Поз.', 'Материал', 'Ед.', 'Участков', 'Количество', 'Площадь, м²'],
+                ...rows.map(r => [r.pos, r.name, r.unit, r.parcels, r.qty, r.area]),
+                ['', 'Общая площадь', 'м²', '', '', Math.round(rows.reduce((t, r) => t + r.area, 0) * 10) / 10]]);
+            ws['!cols'] = [{ wch: 6 }, { wch: 50 }, { wch: 6 }, { wch: 10 }, { wch: 12 }, { wch: 12 }];
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, 'Выбранные участки');
             XLSX.writeFile(wb, `Объёмы по участкам - ${st.drawing.sheet.replace(/[\\/:*?"<>|]/g, ' ')}.xlsx`);
