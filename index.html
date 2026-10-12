@@ -264,6 +264,9 @@
                 <button onclick="openDeliveryForm()" class="volumes-deliveries-only hidden bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold items-center justify-center gap-2 transition-colors">
                     <i class="fa-solid fa-truck"></i> Поставка вручную
                 </button>
+                <button onclick="importVolumesFromDrawings()" class="drawings-admin-only hidden bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold items-center justify-center gap-2 transition-colors">
+                    <i class="fa-solid fa-map"></i> Из чертежей
+                </button>
                 <button onclick="openDesignImport()" class="drawings-admin-only hidden bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold items-center justify-center gap-2 transition-colors">
                     <i class="fa-solid fa-file-excel"></i> Ведомость объёмов
                 </button>
@@ -6092,6 +6095,118 @@
             openUnmatchedDeliveries();
         }
 
+        // ---- Проектные объёмы прямо из чертежей ----
+        // В листе-чертеже есть ведомость (позиция, наименование, ед., кол-во). Берём её из самой свежей
+        // редакции каждого листа. Материал привязан к «лист#позиция», поэтому новая редакция листа
+        // обновляет те же материалы, а не создаёт новые.
+        function extractDrawingQuantities(html) {
+            const tag = html.match(/<script[^>]*id=["']skkg-quantities["'][^>]*>([\s\S]*?)<\/script>/);
+            if (tag) {
+                try { return JSON.parse(tag[1]).map(r => ({ pos: String(r.pos ?? ''), name: r.name, unit: r.unit, qty: parseQty(r.qty) })).filter(r => r.name && r.qty != null); }
+                catch (e) { /* ниже попробуем ведомость интерактивного листа */ }
+            }
+            const m = html.match(/const S\s*=\s*(\[[\s\S]*?\]);/);
+            if (!m) return [];
+            try {
+                const groups = JSON.parse(m[1]);
+                const rows = [];
+                groups.forEach(([, list]) => (list || []).forEach(r => {
+                    const qty = parseQty(r[3]);
+                    if (r[1] && qty != null) rows.push({ pos: String(r[0] || ''), name: String(r[1]).trim(), unit: String(r[2] || '').replace(/\.$/, '').trim(), qty });
+                }));
+                return rows;
+            } catch (e) { return []; }
+        }
+
+        async function collectDrawingQuantities(projectId) {
+            const { data: drawings, error } = await sb.from('drawings').select('*').eq('project_id', projectId);
+            if (error) throw error;
+            // Из нескольких редакций одного листа берём самую свежую.
+            const latest = {};
+            (drawings || []).forEach(d => {
+                const key = normName(d.sheet);
+                const cur = latest[key];
+                const newer = !cur || (d.revision_date || '') > (cur.revision_date || '')
+                    || ((d.revision_date || '') === (cur.revision_date || '') && d.updated_at > cur.updated_at);
+                if (newer) latest[key] = d;
+            });
+            const items = [];
+            for (const d of Object.values(latest)) {
+                const { data: blob, error: dlErr } = await sb.storage.from(DRAWINGS_BUCKET).download(d.file_path);
+                if (dlErr || !blob) continue;
+                const rows = extractDrawingQuantities(await blob.text());
+                const dupNames = new Set(rows.map(r => normName(r.name)).filter((n, i, a) => a.indexOf(n) !== i));
+                rows.forEach(r => items.push({
+                    ref: `${d.sheet}#${r.pos || r.name}`,
+                    name: dupNames.has(normName(r.name)) && r.pos ? `${r.name}, поз. ${r.pos}` : r.name,
+                    unit: r.unit, qty: r.qty,
+                    source: `${d.sheet}${r.pos ? ', поз. ' + r.pos : ''}`,
+                    revision_date: d.revision_date,
+                    sheet: d.sheet,
+                }));
+            }
+            return items;
+        }
+
+        async function importVolumesFromDrawings() {
+            const projectId = volumesState.projectId;
+            if (!projectId) return;
+            showVolumesModal('Объёмы из чертежей', '<div class="text-sm text-slate-500">Читаю ведомости в чертежах проекта...</div>');
+            let items;
+            try { items = await collectDrawingQuantities(projectId); }
+            catch (e) { document.getElementById('volumesModalBody').innerHTML = `<div class="text-sm text-rose-600">Не удалось прочитать чертежи: ${escapeHtml(e.message)}</div>`; return; }
+            if (!items.length) {
+                document.getElementById('volumesModalBody').innerHTML = '<div class="text-sm text-slate-500">В чертежах этого проекта не нашлось ведомостей с количествами.</div>';
+                return;
+            }
+            items.forEach(it => {
+                it.existing = volumesState.materials.find(m => m.drawing_ref === it.ref)
+                    || volumesState.materials.find(m => !m.drawing_ref && normName(m.name) === normName(it.name));
+            });
+            const sheets = new Set(items.map(it => it.sheet));
+            const gone = volumesState.materials.filter(m => m.drawing_ref && sheets.has(m.drawing_ref.split('#')[0])
+                && !items.some(it => it.ref === m.drawing_ref) && Number(m.design_qty) !== 0);
+            pendingImport = { fromDrawings: items, gone };
+            const noDate = [...new Set(items.filter(it => !it.revision_date).map(it => it.sheet))];
+            const added = items.filter(it => !it.existing).length;
+            const changed = items.filter(it => it.existing && Number(it.existing.design_qty) !== it.qty).length;
+            document.getElementById('volumesModalBody').innerHTML = `
+                <p class="text-sm text-slate-500 mb-3">Листов: <b>${sheets.size}</b>, позиций: <b>${items.length}</b>. Новых: <b>${added}</b>, изменится объём: <b>${changed}</b>${gone.length ? `, исчезли из чертежа: <b>${gone.length}</b> (объём станет 0)` : ''}.</p>
+                ${noDate.length ? `<div class="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-sm text-amber-800 mb-3">У листов ${noDate.map(escapeHtml).join(', ')} не указана дата редакции. Объёмы сохранятся без даты; дату можно поставить карандашом в «Чертежах».</div>` : ''}
+                <div class="border border-slate-200 rounded-lg divide-y divide-slate-100 mb-3">
+                    ${items.map(it => {
+                        const was = it.existing ? Number(it.existing.design_qty) : null;
+                        const tag = was == null ? '<span class="text-[11px] text-emerald-600 font-semibold">новый</span>'
+                            : was !== it.qty ? `<span class="text-[11px] text-amber-600 font-semibold">было ${fmtQty(was)}</span>` : '<span class="text-[11px] text-slate-400">без изменений</span>';
+                        return `<div class="px-3 py-2 flex justify-between gap-3 text-sm"><span><span class="text-slate-800">${escapeHtml(it.name)}</span><br><span class="text-[11px] text-slate-400">${escapeHtml(it.source)}</span></span><span class="flex-shrink-0 text-right"><b>${fmtQty(it.qty)} ${escapeHtml(it.unit)}</b><br>${tag}</span></div>`;
+                    }).join('')}
+                    ${gone.map(m => `<div class="px-3 py-2 flex justify-between gap-3 text-sm bg-rose-50/50"><span>${escapeHtml(m.name)}<br><span class="text-[11px] text-slate-400">${escapeHtml(m.source || '')}</span></span><span class="flex-shrink-0 text-right"><b>0 ${escapeHtml(m.unit)}</b><br><span class="text-[11px] text-rose-600 font-semibold">было ${fmtQty(m.design_qty)}, нет в чертеже</span></span></div>`).join('')}
+                </div>
+                <div id="fromDrawingsError" class="hidden text-sm text-rose-600 mb-2"></div>
+                <div class="flex justify-end"><button onclick="saveVolumesFromDrawings()" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-5 py-2 rounded-lg">Обновить объёмы</button></div>`;
+        }
+
+        async function saveVolumesFromDrawings() {
+            const items = pendingImport?.fromDrawings;
+            if (!items) return;
+            const errEl = document.getElementById('fromDrawingsError');
+            for (const it of items) {
+                const row = { project_id: volumesState.projectId, name: it.name, unit: it.unit || 'шт', design_qty: it.qty, revision_date: it.revision_date || null, source: it.source, drawing_ref: it.ref };
+                const ex = it.existing;
+                const same = ex && Number(ex.design_qty) === it.qty && ex.revision_date === row.revision_date && ex.drawing_ref === it.ref;
+                const { error } = same ? { error: null } : ex
+                    ? await sb.from('materials').update(row).eq('id', ex.id)
+                    : await sb.from('materials').insert(row);
+                if (error) { errEl.textContent = `${it.name}: ${error.message}`; errEl.classList.remove('hidden'); await renderVolumes(); return; }
+            }
+            for (const m of pendingImport.gone) {
+                await sb.from('materials').update({ design_qty: 0 }).eq('id', m.id);
+            }
+            pendingImport = null;
+            closeModal('volumesModal');
+            await renderVolumes();
+        }
+
         // ---- Ведомость проектных объёмов из Excel (только администратор чертежей) ----
         function openDesignImport() {
             if (!volumesState.projectId) return;
@@ -6254,6 +6369,13 @@
             document.getElementById('drawingUploadForm').reset();
             document.getElementById('drawingUploadForm').classList.add('hidden');
             refreshDrawingsView(projectId);
+            const found = extractDrawingQuantities(await file.text()).length;
+            if (found && confirm(`В листе есть ведомость: ${found} позиций. Обновить по ней проектные объёмы во вкладке «Объёмы»?`)) {
+                await showVolumesScreen();
+                document.getElementById('volumesProjectFilter').value = projectId;
+                await renderVolumes();
+                await importVolumesFromDrawings();
+            }
         }
 
         async function deleteDrawing(drawingId) {

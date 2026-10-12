@@ -15,8 +15,10 @@ create table if not exists public.materials (
     design_qty    numeric not null default 0,
     revision_date date,          -- от какой редакции проекта взят объём
     source        text,          -- лист или раздел проекта, откуда объём
+    drawing_ref   text,          -- «лист#позиция», если объём взят из ведомости чертежа
     updated_at    timestamptz not null default now()
 );
+alter table public.materials add column if not exists drawing_ref text;
 create index if not exists materials_project_idx on public.materials(project_id);
 
 -- 2. История корректировок проектного объёма (заполняется автоматически).
