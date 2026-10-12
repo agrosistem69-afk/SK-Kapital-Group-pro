@@ -6771,7 +6771,7 @@
                 <button onclick="zonesCancelDraft()" class="${btn} bg-white border border-slate-300 text-slate-700">Отмена</button>`;
             document.getElementById('zonesHint').textContent = st.draft.length < 3
                 ? 'Ставьте точки по углам участка. Двигать план можно, потянув его'
-                : 'Нажмите «Готово» или на первую точку, чтобы замкнуть зону';
+                : `Площадь: ${fmtQty(zoneArea(st.draft))} м². Нажмите «Готово» или на первую точку, чтобы замкнуть зону`;
         }
 
         function zonesRenderOverlay() {
@@ -6789,13 +6789,49 @@
                 const sel = i === st.selected;
                 out += `<polygon points="${pts(z.pts)}" fill="${z.color}" fill-opacity="${sel ? 0.25 : 0.12}" stroke="${z.color}" stroke-width="${sel ? 3 : 2}" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>`;
                 const cx = z.pts.reduce((s, p) => s + p[0], 0) / z.pts.length, cy = z.pts.reduce((s, p) => s + p[1], 0) / z.pts.length;
-                out += `<text x="${cx}" y="${cy}" font-size="${k * 13}" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="${z.color}" stroke="#fff" stroke-width="${k * 3}" paint-order="stroke">${escapeHtml(z.name)}</text>`;
+                out += `<text x="${cx}" y="${cy}" font-size="${k * 13}" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="${z.color}" stroke="#fff" stroke-width="${k * 3}" paint-order="stroke">${escapeHtml(z.name)} · ${fmtQty(zoneArea(z.pts))} м²</text>`;
             });
             if (st.draft?.length) {
                 out += `<polyline points="${pts(st.draft)}" fill="#f59e0b" fill-opacity="0.12" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6 4" vector-effect="non-scaling-stroke"/>`;
                 st.draft.forEach((p, i) => { out += `<circle cx="${p[0]}" cy="${p[1]}" r="${k * (i === 0 ? 7 : 4)}" fill="${i === 0 ? '#fff' : '#f59e0b'}" stroke="#f59e0b" stroke-width="2" vector-effect="non-scaling-stroke"/>`; });
             }
             layer.innerHTML = out;
+        }
+
+        // ---- Площадь зон. Единица плана — метр (проверено по газону: площади выносок совпадают с контурами).
+        // Если план в миллиметрах (лист шире 5 км в единицах), пересчитываем.
+        const zonesAreaFactor = () => (zonesState?.baseVb?.[2] > 5000 ? 1e-6 : 1);
+        function polyArea(poly) {
+            let a = 0;
+            for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) a += (poly[j][0] + poly[i][0]) * (poly[j][1] - poly[i][1]);
+            return Math.abs(a / 2);
+        }
+        const zoneArea = pts => Math.round(polyArea(pts) * zonesAreaFactor() * 10) / 10;
+        function segmentsCross([a, b], [c, d]) {
+            const o = (p, q, r) => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]));
+            return o(a, b, c) !== o(a, b, d) && o(c, d, a) !== o(c, d, b);
+        }
+        function polysOverlap(p, q) {
+            if (p.some(pt => pointInPoly(pt, q)) || q.some(pt => pointInPoly(pt, p))) return true;
+            for (let i = 0; i < p.length; i++) for (let j = 0; j < q.length; j++)
+                if (segmentsCross([p[i], p[(i + 1) % p.length]], [q[j], q[(j + 1) % q.length]])) return true;
+            return false;
+        }
+        // Общая площадь всех зон: если зоны пересекаются, общий кусок считаем один раз (по сетке точек).
+        function zonesUnionArea(zones) {
+            const sum = zones.reduce((s, z) => s + zoneArea(z.pts), 0);
+            const overlap = zones.some((z, i) => zones.some((w, j) => j > i && polysOverlap(z.pts, w.pts)));
+            if (!overlap) return { area: Math.round(sum * 10) / 10, overlap: false };
+            const all = zones.flatMap(z => z.pts);
+            const x0 = Math.min(...all.map(p => p[0])), x1 = Math.max(...all.map(p => p[0]));
+            const y0 = Math.min(...all.map(p => p[1])), y1 = Math.max(...all.map(p => p[1]));
+            const n = 400, dx = (x1 - x0) / n, dy = (y1 - y0) / n;
+            let hits = 0;
+            for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+                const pt = [x0 + (i + 0.5) * dx, y0 + (j + 0.5) * dy];
+                if (zones.some(z => pointInPoly(pt, z.pts))) hits++;
+            }
+            return { area: Math.round(hits * dx * dy * zonesAreaFactor() * 10) / 10, overlap: true };
         }
 
         // По каждой позиции: количество в каждой зоне и общее (место, где зоны пересекаются, — один раз).
@@ -6822,7 +6858,8 @@
             const overlap = rows.some(r => r.zones.reduce((s, q) => s + q, 0) > r.total + 1e-6);
             const withCallouts = new Set(st.plan.callouts.map(c => c.pos));
             const unmarked = st.rows.filter(r => r.pos && !withCallouts.has(r.pos));
-            return { rows, overlap, unmarked };
+            const union = zonesUnionArea(st.zones);
+            return { rows, overlap: overlap || union.overlap, unmarked, areas: st.zones.map(z => zoneArea(z.pts)), areaTotal: union.area };
         }
 
         function zonesRenderPanel() {
@@ -6838,7 +6875,7 @@
             let resultHtml = '';
             if (st.zones.length) {
                 const res = zonesCompute();
-                resultHtml = res.rows.length ? `
+                resultHtml = `
                     <div class="overflow-x-auto -mx-4 px-4">
                         <table class="w-full text-sm">
                             <thead><tr class="text-[11px] text-slate-500 text-left border-b border-slate-200">
@@ -6846,7 +6883,12 @@
                                 ${st.zones.map(z => `<th class="py-1.5 px-2 font-medium text-right whitespace-nowrap"><span class="inline-block w-2 h-2 rounded-full mr-1" style="background:${z.color}"></span>${escapeHtml(z.name)}</th>`).join('')}
                                 ${st.zones.length > 1 ? '<th class="py-1.5 pl-2 font-semibold text-right text-slate-700">Итого</th>' : ''}
                             </tr></thead>
-                            <tbody class="divide-y divide-slate-100">${res.rows.map(r => `
+                            <tbody class="divide-y divide-slate-100">
+                                <tr class="bg-slate-50">
+                                    <td class="py-1.5 pr-2 font-semibold text-slate-800">Площадь зоны <span class="font-normal text-slate-400">м²</span></td>
+                                    ${res.areas.map(a => `<td class="py-1.5 px-2 text-right font-semibold whitespace-nowrap">${fmtQty(a)}</td>`).join('')}
+                                    ${st.zones.length > 1 ? `<td class="py-1.5 pl-2 text-right font-bold whitespace-nowrap">${fmtQty(res.areaTotal)}</td>` : ''}
+                                </tr>${res.rows.map(r => `
                                 <tr>
                                     <td class="py-1.5 pr-2 text-slate-800"><span class="text-slate-400">${escapeHtml(r.pos)}.</span> ${escapeHtml(r.name)} <span class="text-slate-400 whitespace-nowrap">${escapeHtml(r.unit)}</span></td>
                                     ${r.zones.map(q => `<td class="py-1.5 px-2 text-right whitespace-nowrap ${q ? '' : 'text-slate-300'}">${q ? fmtQty(q) : '—'}</td>`).join('')}
@@ -6856,8 +6898,8 @@
                         </table>
                     </div>
                     ${res.overlap ? '<div class="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mt-3">Некоторые зоны пересекаются. В «Итого» общий участок посчитан один раз.</div>' : ''}
-                    <button onclick="zonesExportExcel()" class="mt-3 w-full bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold"><i class="fa-solid fa-file-excel mr-1"></i>Скачать в Excel</button>`
-                    : '<div class="text-sm text-slate-400">В выделенных зонах нет выносок с количеством.</div>';
+                    ${res.rows.length ? '' : '<div class="text-sm text-slate-400 mt-2">В выделенных зонах нет выносок с количеством.</div>'}
+                    <button onclick="zonesExportExcel()" class="mt-3 w-full bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold"><i class="fa-solid fa-file-excel mr-1"></i>Скачать в Excel</button>`;
                 if (res.unmarked.length) resultHtml += `<div class="text-xs text-slate-500 mt-3">Без выносок на плане, поэтому по зонам не считаются: ${res.unmarked.map(r => escapeHtml(r.name)).join(', ')}.</div>`;
             }
             panel.innerHTML = `
@@ -6879,6 +6921,7 @@
             const multi = st.zones.length > 1;
             const aoa = [[st.drawing.sheet], [],
                 ['Поз.', 'Материал', 'Ед.', ...st.zones.map(z => z.name), ...(multi ? ['Итого'] : [])],
+                ['', 'Площадь зоны', 'м²', ...res.areas, ...(multi ? [res.areaTotal] : [])],
                 ...res.rows.map(r => [r.pos, r.name, r.unit, ...r.zones, ...(multi ? [r.total] : [])])];
             const ws = XLSX.utils.aoa_to_sheet(aoa);
             ws['!cols'] = [{ wch: 6 }, { wch: 50 }, { wch: 6 }, ...st.zones.map(() => ({ wch: 12 })), { wch: 12 }];
