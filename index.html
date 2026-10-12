@@ -522,12 +522,9 @@
                  mobileMenuModal. Сама разметка и вся логика разделов не изменены, просто вынесены в
                  контейнер #projectExtraSections, скрытый по умолчанию (hideProjectExtraSections()). -->
             <div id="projectExtraSections" class="hidden">
-                <div class="flex items-center justify-between gap-3 mb-3">
-                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wide"><i class="fa-solid fa-folder-open mr-1.5"></i>Дополнительные разделы объекта</h3>
-                    <button onclick="hideProjectExtraSections()" class="text-slate-400 hover:text-rose-500 text-xs font-medium flex items-center gap-1.5 transition-colors">
-                        <i class="fa-solid fa-xmark"></i><span>Скрыть</span>
-                    </button>
-                </div>
+                <button onclick="hideProjectExtraSections()" class="mb-4 text-sm font-semibold text-slate-500 hover:text-brand-600 transition-colors flex items-center gap-1.5">
+                    <i class="fa-solid fa-arrow-left"></i> <span id="projectSectionBackLabel">К проекту</span>
+                </button>
 
                 <!-- Заказать материалы/инструмент: отдельный раздел со своим циклом статусов
                      (Заказал → Получил счёт → Заказ принят → Отправил накладную), не связан
@@ -740,28 +737,17 @@
                     </span>
                     <span class="text-[10.5px] leading-tight font-semibold text-center break-words">Проекты</span>
                 </button>
-                <button id="navAccountingBtn" data-roles="manager,accountant" onclick="showAccountingScreen()" class="hidden flex-col items-center justify-center gap-1 py-2 px-0.5 hover:text-brand-600 transition-colors">
-                    <span class="nav-icon-wrap relative w-11 h-6 rounded-full flex items-center justify-center">
-                        <i class="fa-solid fa-file-invoice-dollar text-lg"></i>
-                        <span id="accountingBadge" class="hidden absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center">0</span>
-                    </span>
-                    <span class="text-[10.5px] leading-tight font-medium text-center break-words">Бухгалтерия</span>
-                </button>
-                <button id="navPtoBtn" data-roles="manager,pto" onclick="showPtoScreen()" class="hidden flex-col items-center justify-center gap-1 py-2 px-0.5 hover:text-brand-600 transition-colors">
-                    <span class="nav-icon-wrap relative w-11 h-6 rounded-full flex items-center justify-center">
-                        <i class="fa-solid fa-drafting-compass text-lg"></i>
-                        <span id="ptoBadge" class="hidden absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center">0</span>
-                    </span>
-                    <span class="text-[10.5px] leading-tight font-medium text-center break-words">ПТО</span>
-                </button>
                 <button id="navDrawingsBtn" data-roles="manager,worker,lead,pto" onclick="showDrawingsScreen()" class="hidden flex-col items-center justify-center gap-1 py-2 px-0.5 hover:text-brand-600 transition-colors">
                     <span class="nav-icon-wrap relative w-11 h-6 rounded-full flex items-center justify-center">
                         <i class="fa-solid fa-map text-lg"></i>
                     </span>
                     <span class="text-[10.5px] leading-tight font-medium text-center break-words">Чертежи</span>
                 </button>
-                <button data-roles="manager,worker,lead,pto" onclick="openModal('mobileMenuModal')" class="hidden flex-col items-center justify-center gap-1 py-2 px-0.5 hover:text-brand-600 transition-colors">
-                    <i class="fa-solid fa-ellipsis text-lg"></i>
+                <button id="navMoreBtn" data-roles="manager,worker,lead,pto,accountant" onclick="openModal('mobileMenuModal')" class="hidden flex-col items-center justify-center gap-1 py-2 px-0.5 hover:text-brand-600 transition-colors">
+                    <span class="nav-icon-wrap relative w-11 h-6 rounded-full flex items-center justify-center">
+                        <i class="fa-solid fa-ellipsis text-lg"></i>
+                        <span id="moreBadge" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                    </span>
                     <span class="text-[10.5px] leading-tight font-medium text-center break-words">Ещё</span>
                 </button>
                 <button onclick="openModal('accountModal')" class="flex flex-col items-center justify-center gap-1 py-2 px-0.5 hover:text-brand-600 transition-colors">
@@ -1618,11 +1604,28 @@
     <div id="mobileMenuModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center hidden">
         <div class="bg-white rounded-t-2xl sm:rounded-xl shadow-xl max-w-md w-full overflow-hidden">
             <div class="bg-slate-900 px-5 py-4 text-white flex justify-between items-center">
-                <h3 class="font-bold text-base">Действия руководителя</h3>
+                <h3 class="font-bold text-base">Ещё</h3>
                 <button onclick="closeModal('mobileMenuModal')" class="text-slate-400 hover:text-white transition-colors"><i class="fa-solid fa-xmark text-xl"></i></button>
             </div>
             <div class="max-h-[70vh] overflow-y-auto">
-                <div class="px-5 pt-4 pb-1 text-[11px] font-bold text-slate-400 uppercase tracking-wide">Разделы объекта</div>
+                <div data-roles="manager,accountant,pto" class="hidden">
+                    <div class="px-5 pt-4 pb-1 text-[11px] font-bold text-slate-400 uppercase tracking-wide">По всем проектам</div>
+                    <div class="divide-y divide-slate-100 border-b border-slate-100">
+                        <button data-roles="manager,accountant" onclick="closeModal('mobileMenuModal'); showAccountingScreen()" class="hidden w-full items-center gap-4 px-5 py-4 text-left hover:bg-slate-50 transition-colors">
+                            <div class="w-10 h-10 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-file-invoice-dollar"></i></div>
+                            <span class="text-sm font-medium text-slate-800 flex-1">Бухгалтерия</span>
+                            <span id="accountingBadge" class="hidden min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">0</span>
+                            <i class="fa-solid fa-chevron-right text-slate-300 text-xs"></i>
+                        </button>
+                        <button data-roles="manager,pto" onclick="closeModal('mobileMenuModal'); showPtoScreen()" class="hidden w-full items-center gap-4 px-5 py-4 text-left hover:bg-slate-50 transition-colors">
+                            <div class="w-10 h-10 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-drafting-compass"></i></div>
+                            <span class="text-sm font-medium text-slate-800 flex-1">ПТО</span>
+                            <span id="ptoBadge" class="hidden min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">0</span>
+                            <i class="fa-solid fa-chevron-right text-slate-300 text-xs"></i>
+                        </button>
+                    </div>
+                </div>
+                <div data-roles="manager,worker,lead,pto" class="hidden px-5 pt-4 pb-1 text-[11px] font-bold text-slate-400 uppercase tracking-wide">Разделы объекта</div>
                 <div class="divide-y divide-slate-100 border-b border-slate-100">
                     <button data-roles="manager,worker,lead" onclick="openProjectSection('ordersSection')" class="hidden w-full items-center gap-4 px-5 py-4 text-left hover:bg-slate-50 transition-colors">
                         <div class="w-10 h-10 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-cart-shopping"></i></div>
@@ -2217,7 +2220,9 @@
         }
 
         function setActiveNavTab(tab) {
-            const map = { projects: 'navProjectsBtn', accounting: 'navAccountingBtn', pto: 'navPtoBtn', drawings: 'navDrawingsBtn' };
+            // Бухгалтерия и ПТО открываются из «Ещё», поэтому подсвечиваем «Ещё».
+            const map = { projects: 'navProjectsBtn', more: 'navMoreBtn', drawings: 'navDrawingsBtn' };
+            if (tab === 'accounting' || tab === 'pto') tab = 'more';
             Object.entries(map).forEach(([key, id]) => {
                 const btn = document.getElementById(id);
                 if (!btn) return;
@@ -2267,6 +2272,27 @@
             const wrap = document.getElementById('projectExtraSections');
             if (wrap) wrap.classList.add('hidden');
             showOnlyExtraSection(null);
+            setProjectSectionPage(false);
+        }
+
+        // Раздел из «Ещё» открывается отдельной страницей: остальное содержимое проекта
+        // (обзор, задачи, чертежи, табель) прячем, наверху кнопка «назад» к проекту.
+        function setProjectSectionPage(on) {
+            const view = document.getElementById('projectView');
+            [...view.children].forEach(el => {
+                if (el.id !== 'projectExtraSections') el.style.display = on ? 'none' : '';
+            });
+            const proj = appData.projects.find(p => p.id === appData.currentProjectId);
+            document.getElementById('projectSectionBackLabel').textContent = proj ? proj.name : 'К проекту';
+        }
+
+        // Красная точка на «Ещё», если в Бухгалтерии или ПТО есть новое.
+        function updateMoreBadge() {
+            const any = ['accountingBadge', 'ptoBadge'].some(id => {
+                const el = document.getElementById(id);
+                return el && !el.classList.contains('hidden');
+            });
+            document.getElementById('moreBadge')?.classList.toggle('hidden', !any);
         }
 
         // Из меню "Ещё" показываем только выбранный раздел, остальные доп. разделы прячем.
@@ -2288,6 +2314,8 @@
             }
             document.getElementById('projectExtraSections').classList.remove('hidden');
             showOnlyExtraSection(sectionId);
+            setProjectSectionPage(true);
+            setActiveNavTab('more');
             // Разворачиваем нужный раздел, если он был свёрнут аккордеоном
             const expandIfCollapsed = {
                 invoicesSection: () => { if (invoicesSectionCollapsed) toggleInvoicesSection(); },
@@ -2297,10 +2325,7 @@
                 ptoTasksSection: () => { if (ptoTasksSectionCollapsed) togglePtoTasksSection(); },
             };
             if (expandIfCollapsed[sectionId]) expandIfCollapsed[sectionId]();
-            setTimeout(() => {
-                const el = document.getElementById(sectionId);
-                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }, 50);
+            window.scrollTo({ top: 0 });
         }
 
         function renderProjectSelector() {
@@ -3798,6 +3823,7 @@
             } else {
                 badge.classList.add('hidden');
             }
+            updateMoreBadge();
         }
 
         // -------------------- ТАБЕЛЬ УЧЁТА РАБОЧИХ --------------------
@@ -6144,6 +6170,7 @@
             } else {
                 badge.classList.add('hidden');
             }
+            updateMoreBadge();
         }
 
         // -------------------- CRUD: СОТРУДНИКИ --------------------
