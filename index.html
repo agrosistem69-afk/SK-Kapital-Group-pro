@@ -5706,7 +5706,39 @@
                 listEl.innerHTML = `<div class="bg-white rounded-xl border border-slate-200 p-5 text-sm text-slate-500">Проектных объёмов пока нет.${canManageDrawings ? ' Нажмите «Ведомость объёмов» (Excel) или «Материал», чтобы добавить.' : ''}</div>`;
                 return;
             }
-            listEl.innerHTML = materials.map(m => {
+            // Материалы по разделам проекта (раздел листа-чертежа), внутри раздела — по группам ведомости.
+            const bySection = {};
+            materials.forEach(m => { const k = m.section || 'Без раздела'; (bySection[k] = bySection[k] || []).push(m); });
+            const sectionNames = Object.keys(bySection).sort((a, b) => a === 'Без раздела' ? 1 : b === 'Без раздела' ? -1 : a.localeCompare(b, 'ru'));
+            listEl.innerHTML = sectionNames.map(sec => {
+                const list = bySection[sec];
+                const done = list.filter(m => { const t = materialTotals(m.id); return t.design > 0 && t.left <= 0; }).length;
+                const byCat = {};
+                list.forEach(m => { const k = m.category || ''; (byCat[k] = byCat[k] || []).push(m); });
+                const catOrder = Object.keys(byCat).sort((a, b) => !a ? 1 : !b ? -1 : a.localeCompare(b, 'ru'));
+                return `
+                <details class="volumes-section bg-slate-100/60 rounded-xl" data-sec="${escapeHtml(sec)}" ${sectionNames.length === 1 || volumesOpenSections.has(sec) ? 'open' : ''} ontoggle="volumesOpenSections[this.open ? 'add' : 'delete'](this.dataset.sec)">
+                    <summary class="px-4 py-3 cursor-pointer flex items-center gap-3">
+                        <i class="fa-solid fa-folder text-brand-600"></i>
+                        <span class="font-bold text-slate-900 flex-1">${escapeHtml(sec)}</span>
+                        <span class="text-xs text-slate-500">${list.length} мат.${done ? ` · поставлено полностью ${done}` : ''}</span>
+                    </summary>
+                    <div class="px-2 pb-2 space-y-2">
+                        ${catOrder.map(cat => `
+                            ${cat ? `<div class="text-[11px] font-bold text-slate-400 uppercase tracking-wide px-2 pt-2">${escapeHtml(cat)}</div>` : ''}
+                            ${byCat[cat].map(materialCard).join('')}`).join('')}
+                    </div>
+                </details>`;
+            }).join('');
+        }
+
+        const volumesOpenSections = new Set();
+        function sectionDatalist() {
+            const names = [...new Set(volumesState.materials.map(m => m.section).filter(Boolean))];
+            return `<datalist id="volumesSectionList">${names.map(n => `<option value="${escapeHtml(n)}">`).join('')}</datalist>`;
+        }
+
+        function materialCard(m) {
                 const t = materialTotals(m.id);
                 const pct = t.design > 0 ? Math.min(100, Math.round(t.delivered / t.design * 100)) : 0;
                 const over = t.left < 0;
@@ -5727,7 +5759,6 @@
                     </div>
                     <div class="h-1.5 bg-slate-100 rounded-full mt-3 overflow-hidden"><div class="h-full ${over ? 'bg-rose-500' : 'bg-emerald-500'}" style="width:${over ? 100 : pct}%"></div></div>
                 </button>`;
-            }).join('');
         }
 
         function showVolumesModal(title, html) {
@@ -5787,7 +5818,11 @@
                     </div>
                     <div class="grid grid-cols-2 gap-3">
                         <div><label class="block text-xs font-bold text-slate-600 mb-1">Дата редакции проекта *</label><input id="matRev" type="date" required class="${inputCls}" value="${m.revision_date || new Date().toISOString().slice(0, 10)}"></div>
-                        <div><label class="block text-xs font-bold text-slate-600 mb-1">Лист / раздел</label><input id="matSource" class="${inputCls}" value="${escapeHtml(m.source || '')}" placeholder="напр. 11.1"></div>
+                        <div><label class="block text-xs font-bold text-slate-600 mb-1">Лист</label><input id="matSource" class="${inputCls}" value="${escapeHtml(m.source || '')}" placeholder="напр. 11.1"></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block text-xs font-bold text-slate-600 mb-1">Раздел проекта</label><input id="matSection" list="volumesSectionList" class="${inputCls}" value="${escapeHtml(m.section || '')}" placeholder="напр. Озеленение">${sectionDatalist()}</div>
+                        <div><label class="block text-xs font-bold text-slate-600 mb-1">Группа</label><input id="matCategory" class="${inputCls}" value="${escapeHtml(m.category || '')}" placeholder="напр. Деревья"></div>
                     </div>
                     <div id="matError" class="hidden text-sm text-rose-600"></div>
                     <div class="flex justify-end"><button type="submit" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-5 py-2 rounded-lg">Сохранить</button></div>
@@ -5806,6 +5841,8 @@
                 design_qty: qty,
                 revision_date: document.getElementById('matRev').value,
                 source: document.getElementById('matSource').value.trim() || null,
+                section: document.getElementById('matSection').value.trim() || null,
+                category: document.getElementById('matCategory').value.trim() || null,
             };
             const { error } = materialId
                 ? await sb.from('materials').update(row).eq('id', materialId)
@@ -5908,7 +5945,9 @@
                     return {
                         header: r, name, qty,
                         unit: row.findIndex(c => test(c, /^ед|единиц/)),
-                        source: row.findIndex(c => test(c, /^лист|раздел/)),
+                        source: row.findIndex(c => test(c, /^лист/)),
+                        section: row.findIndex(c => test(c, /^раздел/)),
+                        category: row.findIndex(c => test(c, /^групп|^категор|^вид/)),
                         docNum: row.findIndex(c => test(c, /номер док|№ док|номер накладн|номер упд/)),
                         docDate: row.findIndex(c => test(c, /дата/)),
                         supplier: row.findIndex(c => test(c, /поставщик|контрагент|продавец/)),
@@ -6103,7 +6142,7 @@
         function extractDrawingQuantities(html) {
             const tag = html.match(/<script[^>]*id=["']skkg-quantities["'][^>]*>([\s\S]*?)<\/script>/);
             if (tag) {
-                try { return JSON.parse(tag[1]).map(r => ({ pos: String(r.pos ?? ''), name: r.name, unit: r.unit, qty: parseQty(r.qty) })).filter(r => r.name && r.qty != null); }
+                try { return JSON.parse(tag[1]).map(r => ({ pos: String(r.pos ?? ''), name: r.name, unit: r.unit, qty: parseQty(r.qty), section: r.section || '', category: r.category || '' })).filter(r => r.name && r.qty != null); }
                 catch (e) { /* ниже попробуем ведомость интерактивного листа */ }
             }
             const m = html.match(/const S\s*=\s*(\[[\s\S]*?\]);/);
@@ -6111,9 +6150,9 @@
             try {
                 const groups = JSON.parse(m[1]);
                 const rows = [];
-                groups.forEach(([, list]) => (list || []).forEach(r => {
+                groups.forEach(([category, list]) => (list || []).forEach(r => {
                     const qty = parseQty(r[3]);
-                    if (r[1] && qty != null) rows.push({ pos: String(r[0] || ''), name: String(r[1]).trim(), unit: String(r[2] || '').replace(/\.$/, '').trim(), qty });
+                    if (r[1] && qty != null) rows.push({ pos: String(r[0] || ''), name: String(r[1]).trim(), unit: String(r[2] || '').replace(/\.$/, '').trim(), qty, category: String(category || '').trim() });
                 }));
                 return rows;
             } catch (e) { return []; }
@@ -6144,6 +6183,8 @@
                     source: `${d.sheet}${r.pos ? ', поз. ' + r.pos : ''}`,
                     revision_date: d.revision_date,
                     sheet: d.sheet,
+                    section: r.section || d.section || '',
+                    category: r.category || '',
                 }));
             }
             return items;
@@ -6192,9 +6233,10 @@
             if (!items) return;
             const errEl = document.getElementById('fromDrawingsError');
             for (const it of items) {
-                const row = { project_id: volumesState.projectId, name: it.name, unit: it.unit || 'шт', design_qty: it.qty, revision_date: it.revision_date || null, source: it.source, drawing_ref: it.ref };
+                const row = { project_id: volumesState.projectId, name: it.name, unit: it.unit || 'шт', design_qty: it.qty, revision_date: it.revision_date || null, source: it.source, drawing_ref: it.ref, section: it.section || null, category: it.category || null };
                 const ex = it.existing;
-                const same = ex && Number(ex.design_qty) === it.qty && ex.revision_date === row.revision_date && ex.drawing_ref === it.ref;
+                const same = ex && Number(ex.design_qty) === it.qty && ex.revision_date === row.revision_date && ex.drawing_ref === it.ref
+                    && (ex.section || null) === row.section && (ex.category || null) === row.category;
                 const { error } = same ? { error: null } : ex
                     ? await sb.from('materials').update(row).eq('id', ex.id)
                     : await sb.from('materials').insert(row);
@@ -6327,7 +6369,8 @@
                 const existing = volumesState.materials.find(m => normName(m.name) === normName(name));
                 const prevItem = items.find(it => normName(it.name) === normName(name));
                 if (prevItem) { prevItem.qty += qty; continue; }  // одинаковые позиции из разных листов складываем
-                items.push({ name, qty, unit: cols.unit >= 0 ? String(row[cols.unit] || '').trim() : '', source: cols.source >= 0 ? String(row[cols.source] || '').trim() : '', existing });
+                const cell = i => i >= 0 ? String(row[i] || '').trim() : '';
+                items.push({ name, qty, unit: cell(cols.unit), source: cell(cols.source), section: cell(cols.section), category: cell(cols.category), existing });
             }
             if (!items.length) { alert('В таблице нет строк с количеством'); return; }
             pendingImport = { design: items };
@@ -6335,7 +6378,10 @@
             const added = items.filter(it => !it.existing).length;
             showVolumesModal('Ведомость объёмов: ' + file.name, `
                 <p class="text-sm text-slate-500 mb-3">Новых материалов: <b>${added}</b>, изменится объём: <b>${changed}</b>. Материалы, которых нет в файле, останутся как есть.</p>
-                <div class="mb-4 max-w-xs"><label class="block text-xs font-bold text-slate-600 mb-1">Дата редакции проекта *</label><input id="designRev" type="date" class="${inputCls}" value="${new Date().toISOString().slice(0, 10)}"></div>
+                <div class="grid grid-cols-2 gap-3 mb-4">
+                    <div><label class="block text-xs font-bold text-slate-600 mb-1">Дата редакции проекта *</label><input id="designRev" type="date" class="${inputCls}" value="${new Date().toISOString().slice(0, 10)}"></div>
+                    ${items.some(it => it.section) ? '' : `<div><label class="block text-xs font-bold text-slate-600 mb-1">Раздел проекта</label><input id="designSection" list="volumesSectionList" class="${inputCls}" placeholder="напр. Покрытия">${sectionDatalist()}</div>`}
+                </div>
                 <div class="border border-slate-200 rounded-lg divide-y divide-slate-100 mb-3">
                     ${items.map(it => {
                         const was = it.existing ? Number(it.existing.design_qty) : null;
@@ -6354,11 +6400,17 @@
             const errEl = document.getElementById('designError');
             const rev = document.getElementById('designRev').value;
             if (!rev) { errEl.textContent = 'Укажите дату редакции проекта'; errEl.classList.remove('hidden'); return; }
+            const designSection = document.getElementById('designSection')?.value.trim() || '';
             for (const it of items) {
                 const row = { project_id: volumesState.projectId, name: it.name, design_qty: it.qty, revision_date: rev, source: it.source || null };
                 if (it.unit) row.unit = it.unit;
+                const section = it.section || designSection;
+                if (section) row.section = section;
+                if (it.category) row.category = it.category;
+                const same = it.existing && Number(it.existing.design_qty) === it.qty && it.existing.revision_date === rev
+                    && (!section || it.existing.section === section) && (!it.category || it.existing.category === it.category);
                 const { error } = it.existing
-                    ? (Number(it.existing.design_qty) === it.qty && it.existing.revision_date === rev ? { error: null } : await sb.from('materials').update(row).eq('id', it.existing.id))
+                    ? (same ? { error: null } : await sb.from('materials').update(row).eq('id', it.existing.id))
                     : await sb.from('materials').insert(row);
                 if (error) { errEl.textContent = `${it.name}: ${error.message}`; errEl.classList.remove('hidden'); await renderVolumes(); return; }
             }
