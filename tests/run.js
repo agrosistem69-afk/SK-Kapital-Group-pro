@@ -30,7 +30,8 @@ function buildCss() {
 function startServer() {
     const types = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript', '.json': 'application/json', '.png': 'image/png', '.css': 'text/css' };
     const server = http.createServer((req, res) => {
-        const p = path.join(ROOT, decodeURIComponent(req.url.split('?')[0]));
+        let p = path.join(ROOT, decodeURIComponent(req.url.split('?')[0]));
+        if (p.startsWith(ROOT) && fs.existsSync(p) && fs.statSync(p).isDirectory()) p = path.join(p, 'index.html');
         if (!p.startsWith(ROOT) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); res.end(); return; }
         res.writeHead(200, { 'Content-Type': types[path.extname(p)] || 'application/octet-stream' });
         fs.createReadStream(p).pipe(res);
@@ -280,6 +281,26 @@ test('Кнопки «?» открывают подсказки', async () => {
     await openZones(page);
     await page.click('#zonesModal button[title^="Подсказка"]');
     expect(await visible(page, '#helpModal'), 'подсказка «По зонам» не открылась');
+});
+
+// Настоящий service worker (в остальных проверках он отключён): страница должна открываться и через него,
+// в том числе повторно, когда он уже управляет страницей. Ошибка здесь = приложение не откроется на телефоне.
+test('Приложение открывается повторно через service worker', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1)/, r => r.fulfill({ status: 200, body: '' }));
+    await page.route(/supabase-js/, r => r.fulfill({ contentType: 'application/javascript', body: FAKE_SUPABASE }));
+    await page.goto(baseUrl + '/');
+    const ok = await page.evaluate(() => Promise.race([
+        navigator.serviceWorker.ready.then(() => new Promise(r => navigator.serviceWorker.controller ? r(true) : navigator.serviceWorker.addEventListener('controllerchange', () => r(true)))),
+        new Promise(r => setTimeout(() => r(false), 10000)),
+    ]));
+    expect(ok, 'service worker не установился');
+    for (const url of ['/', '/index.html']) {
+        const resp = await page.goto(baseUrl + url).catch(e => e);
+        expect(resp && resp.ok && resp.ok(), `через service worker страница ${url} не открылась: ${resp && resp.message || resp && resp.status()}`);
+        expect(await page.evaluate(() => !!navigator.serviceWorker.controller && !!document.getElementById('scheduleScreen')), `страница ${url} открылась не через service worker или без нужного содержимого`);
+    }
 });
 
 // План-график. Сегодняшнюю дату в тестах задаём сами, чтобы расчёты не зависели от дня запуска.
