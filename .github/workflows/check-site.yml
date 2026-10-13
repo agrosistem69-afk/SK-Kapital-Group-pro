@@ -1,0 +1,29 @@
+name: Check site
+
+# Проверка, что на skkg.ru лежит та же версия, что в репозитории. Ничего не загружает на хостинг.
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Сравнить index.html и service-worker.js на сайте с репозиторием
+        run: |
+          fail=0
+          for f in index.html service-worker.js; do
+            echo "=== $f: заголовки ответа (обычный запрос)"
+            curl -sSI "https://skkg.ru/$f" | grep -iE '^(HTTP|cache-control|expires|last-modified|etag|age|x-cache|server)' || true
+            curl -sS "https://skkg.ru/$f?nocache=$GITHUB_RUN_ID" -o live_nc
+            curl -sS "https://skkg.ru/$f" -o live
+            echo "репозиторий: $(sha256sum < $f | cut -c1-16)  $(wc -c < $f) байт"
+            echo "сайт (?nocache): $(sha256sum < live_nc | cut -c1-16)  $(wc -c < live_nc) байт"
+            echo "сайт (обычный):  $(sha256sum < live | cut -c1-16)  $(wc -c < live) байт"
+            cmp -s "$f" live_nc || { echo "::error::$f на сайте отличается от репозитория"; fail=1; }
+            cmp -s "$f" live || echo "::warning::$f по обычному адресу отдаётся старый (кэш хостинга)"
+          done
+          echo "=== Корень сайта"
+          curl -sSI "https://skkg.ru/" | grep -iE '^(HTTP|cache-control|expires|location|server)' || true
+          curl -sS "https://skkg.ru/" | grep -c 'showScheduleScreen' || true
+          exit $fail
