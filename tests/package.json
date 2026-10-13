@@ -1,0 +1,13 @@
+{
+  "name": "skkg-autotests",
+  "private": true,
+  "description": "Автотесты SKKG Pro: робот открывает приложение и проверяет основные функции",
+  "scripts": {
+    "test": "node run.js"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1",
+    "tailwindcss": "3.4.17",
+    "xlsx": "0.18.5"
+  }
+}

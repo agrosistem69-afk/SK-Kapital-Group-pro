@@ -16,7 +16,7 @@ jobs:
 
       - name: Синтаксис JS-файлов
         run: |
-          find . -name '*.js' -not -path './.git/*' -not -path './node_modules/*' -print0 \
+          find . -name '*.js' -not -path './.git/*' -not -path '*/node_modules/*' -print0 \
             | xargs -0 -r -n1 node --check
 
       - name: Синтаксис встроенных скриптов в HTML
@@ -25,7 +25,7 @@ jobs:
 
       - name: Корректность JSON
         run: |
-          find . -name '*.json' -not -path './.git/*' -not -path './node_modules/*' -print0 \
+          find . -name '*.json' -not -path './.git/*' -not -path '*/node_modules/*' -print0 \
             | xargs -0 -r -n1 python3 -m json.tool > /dev/null
 
       - name: Синтаксис Python
@@ -46,3 +46,24 @@ jobs:
             exit 1
           fi
           echo "Секретов не найдено"
+
+  # Автотесты: робот открывает приложение в браузере, нажимает кнопки и сверяет числа.
+  # Итог по-русски — в отчёте запуска (Actions → CI → Summary).
+  autotests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Установка робота-тестировщика
+        working-directory: tests
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Автотесты
+        working-directory: tests
+        run: node run.js

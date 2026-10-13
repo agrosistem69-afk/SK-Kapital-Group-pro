@@ -15,7 +15,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Перед публикацией обязательно прогоняются автотесты. Если хоть одна проверка не прошла,
+  # публикация не начнётся (deploy зависит от tests).
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Установка робота-тестировщика
+        working-directory: tests
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Автотесты
+        working-directory: tests
+        run: node run.js
+
   deploy:
+    needs: tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,6 +62,7 @@ jobs:
             **/*.md
             supabase/**
             tools/**
+            tests/**
             .htaccess
             .htpasswd
             .well-known/**
