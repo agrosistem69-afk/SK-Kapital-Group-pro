@@ -350,6 +350,35 @@ function seedScheduleItem(page, settings) {
     }, settings);
 }
 
+test('Задачи: счётчики сверху сходятся с разделами (галочка = выполнено)', async () => {
+    const page = await openApp();
+    const r = await page.evaluate(() => {
+        const d = n => getFormattedDate(n);
+        appData.currentProjectId = 'p1';
+        appData.tasks = [
+            { id: 't1', projectId: 'p1', title: 'А', category: 'Участок 1', status: 'new', dueDate: d(5) },
+            { id: 't2', projectId: 'p1', title: 'Б', category: 'Участок 1', status: 'in_progress', dueDate: d(-2) },
+            { id: 't3', projectId: 'p1', title: 'В', category: 'Участок 2', status: 'review', dueDate: d(3) },
+            { id: 't4', projectId: 'p1', title: 'Г', category: 'Участок 2', status: 'completed', dueDate: d(-5) },
+            { id: 't5', projectId: 'p1', title: 'Д', category: 'Участок 2', status: 'in_progress', dueDate: d(-1), struck: true },
+        ];
+        renderProjectOverview();
+        appData.groupingMode = 'category';
+        document.getElementById('statusFilter').value = 'all';
+        renderTasksList();
+        const num = id => +document.getElementById(id).innerText;
+        const heads = [...document.querySelectorAll('#tasksContainer h3')].map(h => h.closest('div.min-w-0').innerText.replace(/\s+/g, ' '));
+        const filtered = v => { document.getElementById('statusFilter').value = v; return getFilteredTasks().map(t => t.id).join(','); };
+        return { total: num('statTotalTasks'), fresh: num('statNew'), prog: num('statInProgress'), done: num('statCompleted'), over: num('statOverdue'), heads,
+            fNew: filtered('new'), fProg: filtered('in_progress'), fDone: filtered('completed'), fOver: filtered('overdue') };
+    });
+    expect(r.total === 5 && r.fresh === 1 && r.prog === 2 && r.done === 2 && r.over === 1, 'счётчики сверху: ' + JSON.stringify(r));
+    expect(r.fresh + r.prog + r.done === r.total, 'Новые + В процессе + Завершено должно равняться Всего: ' + JSON.stringify(r));
+    expect(r.heads.some(h => h.includes('Участок 1') && h.includes('0/2 готово')) && r.heads.some(h => h.includes('Участок 2') && h.includes('2/3 готово')), 'готово по участкам: ' + JSON.stringify(r.heads));
+    expect(r.fNew === 't1' && r.fProg === 't2,t3' && r.fDone === 't4,t5' && r.fOver === 't2', 'нажатие на счётчик показывает те же работы: ' + JSON.stringify(r));
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
 test('План-график: составляется из объёмов по нормам выработки', async () => {
     const page = await openApp({ admin: true });
     await page.evaluate(() => showVolumesScreen());

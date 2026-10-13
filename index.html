@@ -483,10 +483,14 @@
                         <p id="currentProjectDesc" class="text-sm text-slate-500 mt-1">Описание проекта...</p>
                     </div>
 
-                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                    <div class="grid grid-cols-3 sm:grid-cols-5 gap-3 text-center">
                         <button id="statBoxTotal" onclick="quickFilterByStatus('all')" class="bg-slate-50 p-2.5 rounded-lg border border-slate-100 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer text-center">
                             <div class="text-xs text-slate-500 font-medium">Всего задач</div>
                             <div id="statTotalTasks" class="text-xl font-bold text-slate-800">0</div>
+                        </button>
+                        <button id="statBoxNew" onclick="quickFilterByStatus('new')" class="bg-slate-50 p-2.5 rounded-lg border border-slate-100 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer text-center">
+                            <div class="text-xs text-slate-500 font-medium">Новые</div>
+                            <div id="statNew" class="text-xl font-bold text-slate-700">0</div>
                         </button>
                         <button id="statBoxInProgress" onclick="quickFilterByStatus('in_progress')" class="bg-blue-50 p-2.5 rounded-lg border border-blue-100 hover:shadow-md hover:border-blue-300 transition-all cursor-pointer text-center">
                             <div class="text-xs text-blue-600 font-medium">В процессе</div>
@@ -2504,12 +2508,21 @@
             renderApp();
         }
 
+        // Работа считается выполненной, если у неё статус «Завершено» или её отметили галочкой (зачеркнули).
+        // Так счётчики в шапке проекта и «N/M готово» в разделах считают одинаково, и «Новые» + «В процессе» + «Завершено» = «Всего».
+        function isTaskDone(t) { return t.status === 'completed' || !!t.struck; }
+        function taskStatusGroup(t) {
+            if (isTaskDone(t)) return 'completed';
+            return t.status === 'in_progress' || t.status === 'review' ? 'in_progress' : 'new';
+        }
+        function isTaskOverdue(t, today) { return !isTaskDone(t) && !!t.dueDate && t.dueDate < today; }
+
         function renderProjectOverview() {
             const currentProj = appData.projects.find(p => p.id === appData.currentProjectId);
             if (!currentProj) {
                 document.getElementById('currentProjectTitle').innerText = 'Нет доступных проектов';
                 document.getElementById('currentProjectDesc').innerText = 'Обратитесь к руководителю проекта, чтобы получить доступ.';
-                ['statTotalTasks','statInProgress','statCompleted','statOverdue'].forEach(id => document.getElementById(id).innerText = '0');
+                ['statTotalTasks','statNew','statInProgress','statCompleted','statOverdue'].forEach(id => document.getElementById(id).innerText = '0');
                 updateStatBoxActiveHighlight();
                 document.getElementById('projectProgressPercent').innerText = '0%';
                 document.getElementById('projectProgressBar').style.width = '0%';
@@ -2521,12 +2534,14 @@
 
             const projTasks = appData.tasks.filter(t => t.projectId === currentProj.id);
             const total = projTasks.length;
-            const inProgress = projTasks.filter(t => t.status === 'in_progress' || t.status === 'review').length;
-            const completed = projTasks.filter(t => t.status === 'completed').length;
-            const today = new Date().toISOString().split('T')[0];
-            const overdue = projTasks.filter(t => t.status !== 'completed' && t.dueDate && t.dueDate < today).length;
+            const today = getFormattedDate(0);
+            const fresh = projTasks.filter(t => taskStatusGroup(t) === 'new').length;
+            const inProgress = projTasks.filter(t => taskStatusGroup(t) === 'in_progress').length;
+            const completed = projTasks.filter(isTaskDone).length;
+            const overdue = projTasks.filter(t => isTaskOverdue(t, today)).length;
 
             document.getElementById('statTotalTasks').innerText = total;
+            document.getElementById('statNew').innerText = fresh;
             document.getElementById('statInProgress').innerText = inProgress;
             document.getElementById('statCompleted').innerText = completed;
             document.getElementById('statOverdue').innerText = overdue;
@@ -2578,11 +2593,11 @@
                 if (t.projectId !== appData.currentProjectId) return false;
                 if (workerFilter !== 'all' && t.workerId !== workerFilter) return false;
                 if (statusFilter === 'overdue') {
-                    if (!(t.status !== 'completed' && t.dueDate && t.dueDate < today)) return false;
-                } else if (statusFilter === 'in_progress') {
-                    // Соответствует счётчику "В процессе" в шапке проекта, который считает in_progress + review вместе
-                    if (t.status !== 'in_progress' && t.status !== 'review') return false;
-                } else if (statusFilter !== 'all' && t.status !== statusFilter) {
+                    if (!isTaskOverdue(t, today)) return false;
+                } else if (statusFilter === 'review') {
+                    if (isTaskDone(t) || t.status !== 'review') return false;
+                } else if (statusFilter !== 'all' && taskStatusGroup(t) !== statusFilter) {
+                    // Фильтры совпадают со счётчиками в шапке: «В процессе» = в работе + на проверке, «Завершено» = статус или галочка
                     return false;
                 }
                 if (search) {
@@ -2609,6 +2624,7 @@
             const statusFilter = document.getElementById('statusFilter').value;
             const boxes = {
                 all: 'statBoxTotal',
+                new: 'statBoxNew',
                 in_progress: 'statBoxInProgress',
                 completed: 'statBoxCompleted',
                 overdue: 'statBoxOverdue'
@@ -2780,7 +2796,7 @@
                     groupBadge = `<span class="bg-slate-200 text-slate-700 text-xs px-2.5 py-0.5 rounded-full font-semibold"><i class="fa-solid fa-layer-group mr-1 text-slate-500"></i>${groupTasks.length} работ</span>`;
                 }
 
-                const completedInGroup = groupTasks.filter(t => t.status === 'completed').length;
+                const completedInGroup = groupTasks.filter(isTaskDone).length;
                 const isCollapsed = appData.accordionState[groupKey] === true;
                 const groupProgress = calculateGroupProgress(groupTasks);
                 const hideStruckHere = !!appData.hideStruckState[groupKey];
@@ -2836,7 +2852,7 @@
             const worker = appData.workers.find(w => w.id === task.workerId);
             const workerName = worker ? worker.name : 'Не назначен';
             const today = new Date().toISOString().split('T')[0];
-            const isOverdue = task.status !== 'completed' && task.dueDate && task.dueDate < today;
+            const isOverdue = isTaskOverdue(task, today);
 
             let deadlineBadge = isOverdue ? `<span class="bg-rose-100 text-rose-700 text-[10px] font-bold px-1.5 py-0.5 rounded inline-flex items-center gap-1"><i class="fa-solid fa-triangle-exclamation"></i>Просрочено</span>` : '';
 
