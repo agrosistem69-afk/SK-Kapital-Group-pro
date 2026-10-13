@@ -5,7 +5,7 @@
 <script>
 const S=[["Деревья",[["1","Клен тестовый","шт.","5"]]],["Кустарники",[["2","Спирея тестовая","шт.","300"]]],["Газоны",[["3","Газон рулонный тестовый","м²","120"]]],["Мульча",[["4","Мульчирование тестовое","м²","10"]]]];
 const TIPS={"1":[[20,20],[80,20]],"2":[[30,30],[85,40]],"3":[[40,45],[90,7]]};
-const PLANZ="H4sIAAAAAAAAA7WUTU7jQBBGr1Iq1obqanfckdK5wey4gGO3Y4sShLhHMCxZcR7WrDgB3Ag5dvhRkoaQjLKwLUX9nvI+Z7LIQw2F5G3rsA0IZR7ypHVYhFuENiyvLrzDE6KsqiqE0uEfA0ZGBN3HECT9bWLoDs+mk/n6rObTWWHp/fAkDs/9O2fhUK2/tiwchmaB08lKqWpEHJ6wz0rNPViNQY2FV2SGhKFHns3/Lzb7ERak/CDLTIaH2qEi2uReO9Tw+vB6f4rTydIXYX1SPUO4dagY4V9/uWnKUDvUCLVv5nVwyB3/czi5/NKKht+LQbFYsHvqqq26HNPNjqCbRXQ/XGd/23pXVI5HHfvS+wHGBtiK6mesCJLuNj6nI5EtgTY/IccS8Sa6S0QU3ZRdReL0kE1Z4FQUw2hPY73VWMWNh1lpOmxWmkRpUBTNW8nVza68Op63sH6UDzhNkLJwnzeFhL/d1ZHAtvtfVu/c36wq3QRfO7QEL0/Pj9sLcV8otQcUYobUirKQ6D2FzVbhNCacmf4lOGRRBliUATPYvgFsajNURAcAAA==";
+const PLANZ="H4sIAAAAAAAAA7WVTW7bMBBGrzKYrNWQQ9KiAdM3yC4XkCXKEjpIHItFfpZd9Txdd9UTNDcqZMqJC9uMFbvQQiIgzPug94mcrYrQQMlF1znsAkJVhCLrHJbhCaEL6/uv3uGVEHld1wiVwxsDhicC+ssIyOJjZsQLXs9ny+2sdmdWWHs/rNjhrX/jrBzK7Wvr0mFoVzifbSLVLbPDK/J5pSiC5RTklGlDJsgIIvJ6+X+x+UlY4OqdzAseFo1DKcQ+98Ghgtcfr9+/4Hy29mXYTmoWCE8OJSE8x9tjW4XGoUJofLtsgkPq+bvi+O4fV2L4XgSS2IIdGVcejEupuPkF4uaJuO9ZF9+65phUSkud+sr7AUYGyLKMNZYCsv4xXacLka0AZU4hpxTRPrpXJESyU3YjifQ5nbJAmiXBZGRidTCxTCceaqXEebVSgqUCKZJ6a75/PKZXpfWW1k+KAacEaGKKejVk9GGvLgS2/b4s37ifaZXeBz84tAL+/Pr987Ahioa0PcMQEWjL0kKmRgY2BwPrVODcxJ/gnEYZIJYGzFitx+Xl/Vm6tWdO2Y1GjacpaMkUz7AJZLRziP0FdnCoUAIIAAA=";
 (async()=>{const bin=Uint8Array.from(atob(PLANZ),c=>c.charCodeAt(0));
 document.getElementById("root").innerHTML=await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream("gzip"))).text();})();
 </script>

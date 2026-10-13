@@ -1693,6 +1693,10 @@
         #zonesSvg g.zpick:not(.ld) path { stroke: #c2410c !important; stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
         #zonesSvg g.ld.zpick .ln { stroke: #c2410c !important; stroke-width: 2px; }
         #zonesSvg g.ld.zpick .hb { fill: #fed7aa; fill-opacity: 1; }
+        #zonesSvg.zones-picking g.zorphan path { pointer-events: all; }
+        #zonesSvg g.zorphan path[fill] { stroke: #dc2626 !important; stroke-width: 2px; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; }
+        #zonesSvg .zorphan-label { fill: #dc2626; font-weight: 700; text-anchor: middle; dominant-baseline: middle; pointer-events: none; paint-order: stroke; stroke: #fff; stroke-width: .25px; }
+        #zonesSvg:not(.zones-picking) .zorphan-label { display: none; }
     </style>
     <div id="zonesModal" class="fixed inset-0 bg-white z-[60] flex flex-col hidden">
         <div class="flex items-center gap-3 px-4 py-2 bg-slate-900 text-white">
@@ -7035,6 +7039,87 @@
                     || cands.reduce((best, pr) => { const d = Math.hypot(pr.pt[0] - cx, pr.pt[1] - cy); return !best || d < best.d ? { pr, d } : best; }, null).pr;
             });
             items.forEach(it => { it.parcel.els.push(it.g); st.parcelOf.set(it.g, [it.parcel.key]); st.parcelArea.set(it.g, it.b.width * it.b.height); });
+            zonesFindOrphans(items);
+        }
+
+        // Участки без выноски: закрашенная фигура посадок, на которую не указывает ни одна выноска, хотя такой же
+        // цвет у позиций ведомости (например, кусок газона, где проектировщик забыл выноску). Тип угадываем:
+        // если цвет у одной позиции — она; если у нескольких — по ближайшему участку того же цвета.
+        // Такие участки можно выбирать, они подсвечиваются красным пунктиром, а в ведомости проекта их объёма нет.
+        function zonesFindOrphans(items) {
+            const st = zonesState, root = document.getElementById('zonesPlan');
+            st.orphans = [];
+            const fillOf = g => { const f = g.querySelector('path[fill]')?.getAttribute('fill'); return f && f !== 'none' ? f.toLowerCase() : null; };
+            const units = {};
+            st.rows.forEach(r => { if (r.pos && !(r.pos in units)) units[r.pos] = r.unit; });
+            // Цвета позиций — по фигурам, на которые указывают выноски.
+            const colorPos = {};
+            items.forEach(it => {
+                if (it.g.dataset.src === 'tip') { const f = fillOf(it.g); if (f) (colorPos[f] ||= new Set()).add(it.pos); }
+            });
+            // Только площадные посадки (цветники, газоны): отдельные значки деревьев и кустов без выносок — это обычно условные обозначения.
+            const loose = [...root.querySelectorAll('g.it:not([data-p]):not(.ld)')].filter(g => g.dataset.s === 'flow' || g.dataset.s === 'lawn');
+            loose.forEach(g => {
+                const fill = fillOf(g);
+                const cands = fill && colorPos[fill] ? [...colorPos[fill]] : [];
+                if (!cands.length) return;
+                const b = g.getBBox();
+                const paths = [...g.querySelectorAll('path[fill]')];
+                const pr = { key: `orphan@${b.x.toFixed(2)},${b.y.toFixed(2)}`, pos: cands[0], qty: 0, pt: [b.x + b.width / 2, b.y + b.height / 2], els: [g], labels: [], orphan: true };
+                pr.area = parcelArea(pr, '');
+                if (pr.area < 1) return;   // обрезки и щели меньше 1 м² не считаем
+                // Точки внутри фигуры: по ним ставим подпись и проверяем, не повторяет ли фигура уже подписанный участок.
+                const inner = [];
+                for (let i = 0; i < 7; i++) for (let j = 0; j < 7; j++) {
+                    const x = b.x + b.width * (i + 0.5) / 7, y = b.y + b.height * (j + 0.5) / 7;
+                    if (paths.some(p => p.isPointInFill(new DOMPoint(x, y)))) inner.push([x, y]);
+                }
+                if (!inner.length) return;
+                // Остриё выноски позиции этого цвета попадает в фигуру — значит, выноска у неё есть (контур и заливка бывают разными фигурами).
+                const tips = [...st.parcels.values()].filter(q => !q.orphan && cands.includes(q.pos) && q.pt[0] >= b.x && q.pt[0] <= b.x + b.width && q.pt[1] >= b.y && q.pt[1] <= b.y + b.height);
+                if (tips.some(q => paths.some(p => p.isPointInFill(new DOMPoint(q.pt[0], q.pt[1])) || p.isPointInStroke(new DOMPoint(q.pt[0], q.pt[1]))))) return;
+                const covered = inner.filter(([x, y]) => items.some(it => x >= it.b.x && x <= it.b.x + it.b.width && y >= it.b.y && y <= it.b.y + it.b.height
+                    && [...it.g.querySelectorAll('path[fill]')].some(p => p.getAttribute('fill') !== 'none' && p.isPointInFill(new DOMPoint(x, y))))).length;
+                if (covered / inner.length > 0.4) return;
+                const c0 = [b.x + b.width / 2, b.y + b.height / 2];
+                pr.pt = inner.reduce((best, q) => Math.hypot(q[0] - c0[0], q[1] - c0[1]) < Math.hypot(best[0] - c0[0], best[1] - c0[1]) ? q : best);
+                // Фон под другими посадками (внутри есть фигуры с выносками) — это не отдельный участок.
+                if (items.some(it => {
+                    const cx = it.b.x + it.b.width / 2, cy = it.b.y + it.b.height / 2;
+                    return cx > b.x && cx < b.x + b.width && cy > b.y && cy < b.y + b.height && paths.some(p => p.isPointInFill(new DOMPoint(cx, cy)));
+                })) return;
+                if (cands.length > 1) {
+                    // Цвет общий у нескольких позиций: берём позицию ближайшего к нему участка того же цвета
+                    // (по расстоянию между контурами, соседний кусок газона обычно продолжение того же газона).
+                    const gap = (p, q) => Math.hypot(Math.max(0, p.x - (q.x + q.width), q.x - (p.x + p.width)), Math.max(0, p.y - (q.y + q.height), q.y - (p.y + p.height)));
+                    let best = null;
+                    items.forEach(it => {
+                        if (it.g.dataset.src !== 'tip' || !cands.includes(it.pos) || fillOf(it.g) !== fill) return;
+                        const d = gap(b, it.b);
+                        if (!best || d < best.d) best = { d, pos: it.pos };
+                    });
+                    if (best) pr.pos = best.pos;
+                    pr.guessed = true;
+                }
+                pr.qty = /м2|м²|кв\.?\s*м/i.test(units[pr.pos] || '') ? Math.round(pr.area * 10) / 10 : 0;
+                pr.key += '#' + pr.pos;
+                st.parcels.set(pr.key, pr);
+                st.parcelOf.set(g, [pr.key]);
+                st.parcelArea.set(g, b.width * b.height);
+                g.classList.add('zorphan');
+                st.orphans.push(pr);
+            });
+            // Подписи-«выноски» для таких участков: номер позиции, площадь и знак вопроса.
+            const ns = 'http://www.w3.org/2000/svg';
+            st.orphans.forEach(pr => {
+                const t = document.createElementNS(ns, 'text');
+                const fs = Math.max(0.8, Math.min(2.2, Math.sqrt(pr.area) / 5));
+                t.setAttribute('x', pr.pt[0]); t.setAttribute('y', pr.pt[1]);
+                t.setAttribute('class', 'zorphan-label');
+                t.setAttribute('font-size', fs);
+                t.textContent = `${pr.pos}? ${fmtQty(Math.round(pr.area * 10) / 10)} м²`;
+                root.appendChild(t);
+            });
         }
 
         function zonesSetMode(mode) {
@@ -7123,7 +7208,7 @@
         }
 
         function zonesPickedRows() {
-            const st = zonesState, sum = {}, count = {}, area = {};
+            const st = zonesState, sum = {}, count = {}, area = {}, orphan = {};
             const info = {};
             st.rows.forEach(r => { if (r.pos && !info[r.pos]) info[r.pos] = r; });
             st.picked.forEach(k => {
@@ -7131,13 +7216,14 @@
                 if (!pr) return;
                 sum[pr.pos] = (sum[pr.pos] || 0) + pr.qty;
                 count[pr.pos] = (count[pr.pos] || 0) + 1;
+                if (pr.orphan) orphan[pr.pos] = (orphan[pr.pos] || 0) + 1;
                 area[pr.pos] = (area[pr.pos] || 0) + parcelArea(pr, info[pr.pos]?.unit);
             });
             const order = st.rows.map(r => r.pos).filter((p, i, a) => p && a.indexOf(p) === i);
             Object.keys(sum).forEach(p => { if (!order.includes(p)) order.push(p); });
-            return order.filter(p => sum[p]).map(p => {
+            return order.filter(p => count[p]).map(p => {
                 const r = info[p] || { name: `Позиция ${p}`, unit: '' };
-                return { pos: p, name: r.name, unit: r.unit, qty: roundQty(sum[p], r.unit), parcels: count[p], area: Math.round(area[p] * 10) / 10 };
+                return { pos: p, name: r.name, unit: r.unit, qty: roundQty(sum[p], r.unit), parcels: count[p], orphans: orphan[p] || 0, area: Math.round(area[p] * 10) / 10 };
             });
         }
 
@@ -7159,7 +7245,7 @@
                         </tr></thead>
                         <tbody class="divide-y divide-slate-100">${rows.map(r => `
                             <tr>
-                                <td class="py-1.5 pr-2 text-slate-800"><span class="text-slate-400">${escapeHtml(r.pos)}.</span> ${escapeHtml(r.name)}</td>
+                                <td class="py-1.5 pr-2 text-slate-800"><span class="text-slate-400">${escapeHtml(r.pos)}.</span> ${escapeHtml(r.name)}${r.orphans ? ` <span class="text-rose-600 text-[11px] whitespace-nowrap">в т.ч. без выноски: ${r.orphans}</span>` : ''}</td>
                                 <td class="py-1.5 px-2 text-right text-slate-500">${r.parcels}</td>
                                 <td class="py-1.5 px-2 text-right font-semibold whitespace-nowrap">${fmtQty(r.qty)} <span class="font-normal text-slate-400">${escapeHtml(r.unit)}</span></td>
                                 <td class="py-1.5 pl-2 text-right whitespace-nowrap">${r.area ? fmtQty(r.area) : '—'}</td>
@@ -7173,7 +7259,33 @@
                     </div>
                     <button onclick="zonesExportExcel()" class="mt-3 w-full bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold"><i class="fa-solid fa-file-excel mr-1"></i>Скачать в Excel</button>`
                 : '<div class="text-sm text-slate-400">Нажмите на цветник, куст, дерево или газон на плане. Выбранные участки подсветятся оранжевым, а их количество сложится здесь.</div>'}
+                ${zonesOrphansHtml()}
                 <div class="text-[11px] text-slate-400 mt-4">Участок — это место, на которое указывает выноска с количеством. Количество участка берётся из этой выноски. Нажатие на саму выноску выбирает все её участки. Площадь считается по контуру участка на плане, а у газона и других позиций в м² берётся из выноски.</div>`;
+        }
+
+        // Список участков без выноски: где они, какой тип угадан и какая площадь. Нажатие — показать на плане.
+        function zonesOrphansHtml() {
+            const list = zonesState?.orphans || [];
+            if (!list.length) return '';
+            const units = {}, names = {};
+            zonesState.rows.forEach(r => { if (r.pos && !(r.pos in names)) { names[r.pos] = r.name; units[r.pos] = r.unit; } });
+            const total = Math.round(list.reduce((t, pr) => t + pr.area, 0) * 10) / 10;
+            return `<div id="zonesOrphans" class="mt-4 border border-rose-200 bg-rose-50 rounded-lg p-3">
+                <div class="text-sm font-bold text-rose-700 mb-1"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Участки без выноски: ${list.length} (${fmtQty(total)} м²)</div>
+                <div class="text-[11px] text-slate-600 mb-2">На плане обведены красным пунктиром. Выносок с количеством у них нет, поэтому в ведомости проекта их объёма нет. Тип угадан по цвету и соседним участкам — проверьте. Их можно выбирать, как обычные участки.</div>
+                <div class="space-y-1">${list.map((pr, i) => `
+                    <button onclick="zonesShowOrphan(${i})" class="zones-orphan w-full flex items-center justify-between gap-2 text-left text-xs bg-white hover:bg-rose-100 border border-rose-100 rounded px-2 py-1.5">
+                        <span class="min-w-0 truncate"><span class="text-slate-400">${escapeHtml(pr.pos)}?</span> ${escapeHtml(names[pr.pos] || 'Позиция ' + pr.pos)}</span>
+                        <span class="font-semibold whitespace-nowrap">${fmtQty(Math.round(pr.area * 10) / 10)} м²</span>
+                    </button>`).join('')}</div>
+            </div>`;
+        }
+        function zonesShowOrphan(i) {
+            const st = zonesState, pr = st?.orphans?.[i];
+            if (!pr) return;
+            const w = Math.max(20, Math.sqrt(pr.area) * 5), r = st.baseVb[3] / st.baseVb[2];
+            st.vb = [pr.pt[0] - w / 2, pr.pt[1] - w * r / 2, w, w * r];
+            zonesApplyViewBox();
         }
 
         async function zonesExportPicked() {
@@ -7182,7 +7294,7 @@
             try { await loadXlsxLib(); } catch (e) { alert(e.message); return; }
             const ws = XLSX.utils.aoa_to_sheet([[st.drawing.sheet], [`Выбрано участков: ${st.picked.size}`], [],
                 ['Поз.', 'Материал', 'Ед.', 'Участков', 'Количество', 'Площадь, м²'],
-                ...rows.map(r => [r.pos, r.name, r.unit, r.parcels, r.qty, r.area]),
+                ...rows.map(r => [r.pos, r.name + (r.orphans ? ` (в т.ч. без выноски на чертеже: ${r.orphans})` : ''), r.unit, r.parcels, r.qty, r.area]),
                 ['', 'Общая площадь', 'м²', '', '', Math.round(rows.reduce((t, r) => t + r.area, 0) * 10) / 10]]);
             ws['!cols'] = [{ wch: 6 }, { wch: 50 }, { wch: 6 }, { wch: 10 }, { wch: 12 }, { wch: 12 }];
             const wb = XLSX.utils.book_new();
@@ -8004,6 +8116,7 @@
                     <ul class="space-y-1 pl-1">
                         <li>Количество берётся из выносок: «28 / 256» значит позиция 28 по ведомости, 256 шт. Если после числа стоит «м²», это площадь.</li>
                         <li>Позиции без выносок на плане (например, мульчирование) по зонам не считаются.</li>
+                        <li><b>Красный пунктир</b> — участок без выноски: на чертеже он нарисован, но количества у него нет, и в ведомости проекта его объёма нет. Программа угадывает тип по цвету и соседним участкам и считает площадь. Список таких участков — под таблицей, нажатие показывает участок на плане.</li>
                         <li>«Скачать в Excel» сохраняет таблицу файлом.</li>
                         <li>Выбранное и нарисованное сохраняется и видно на телефоне и компьютере под вашей учётной записью.</li>
                         <li>Эти подсчёты не меняют проектные объёмы в списке, это отдельный расчёт.</li>

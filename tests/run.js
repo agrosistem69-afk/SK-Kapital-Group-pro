@@ -261,6 +261,26 @@ test('По зонам: обведённая зона — площадь и ко�
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
+test('По зонам: участок без выноски найден, подсвечен и считается', async () => {
+    const page = await openApp();
+    await openZones(page);
+    const o = await page.evaluate(() => zonesState.orphans.map(p => ({ pos: p.pos, area: p.area, qty: p.qty })));
+    expect(o.length === 1, 'ожидался 1 участок без выноски (подложка под подписанным газоном не считается), найдено ' + JSON.stringify(o));
+    expect(o[0].pos === '3' && near(o[0].area, 50, 1.5) && near(o[0].qty, 50, 1.5), 'участок 10×5 м: ожидался газон (поз. 3), 50 м², получено ' + JSON.stringify(o[0]));
+    expect((await page.$eval('#zonesOrphans', e => e.innerText)).includes('Участки без выноски: 1'), 'нет списка участков без выноски');
+    expect(await page.$$eval('#zonesPlan g.zorphan', g => g.length) === 1, 'участок без выноски не подсвечен на плане');
+    const [sx, sy] = await planToScreen(page, 75, 52.5);
+    await page.mouse.click(sx, sy);
+    const rows = await page.evaluate(() => zonesPickedRows());
+    expect(rows.length === 1 && rows[0].pos === '3' && rows[0].orphans === 1 && near(rows[0].qty, 50, 1.5), 'выбор участка без выноски: ' + JSON.stringify(rows));
+    // Обычные подсчёты не изменились.
+    const [tx, ty] = await planToScreen(page, 40, 44);
+    await page.mouse.click(tx, ty);
+    const r3 = await page.evaluate(() => zonesPickedRows().find(r => r.pos === '3'));
+    expect(near(r3.qty, 130, 1.5) && r3.parcels === 2, 'газон 80 м² + участок без выноски 50 м² = 130 м², получено ' + JSON.stringify(r3));
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
 test('По зонам работает на телефоне', async () => {
     const page = await openApp({ width: 390, height: 800 });
     await openZones(page);
