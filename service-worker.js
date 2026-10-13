@@ -5,7 +5,7 @@
 // При каждом обновлении файлов сайта меняйте CACHE_NAME (например, v2, v3...),
 // чтобы у пользователей автоматически подтянулась новая версия.
 
-const CACHE_NAME = 'workcontrol-cache-v19';
+const CACHE_NAME = 'workcontrol-cache-v20';
 const PRECACHE_URLS = [
     './',
     './index.html',
@@ -41,7 +41,8 @@ self.addEventListener('fetch', (event) => {
     // HTML-страницы — всегда сначала пробуем сеть, чтобы не показывать устаревшую версию.
     if (request.mode === 'navigate' || request.destination === 'document') {
         event.respondWith(
-            fetch(request)
+            // cache: 'no-store' — не брать страницу из кэша браузера, иначе после публикации телефон может показывать старую версию.
+            fetch(request, { cache: 'no-store' })
                 .then((response) => {
                     const copy = response.clone();
                     caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
