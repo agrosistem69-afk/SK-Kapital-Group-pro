@@ -7053,6 +7053,7 @@
             const units = {};
             st.rows.forEach(r => { if (r.pos && !(r.pos in units)) units[r.pos] = r.unit; });
             // Цвета позиций — по фигурам, на которые указывают выноски.
+            const m2 = p => /м2|м²|кв\.?\s*м/i.test(units[p] || '');
             const colorPos = {};
             const gap = (p, q) => Math.hypot(Math.max(0, p.x - (q.x + q.width), q.x - (p.x + p.width)), Math.max(0, p.y - (q.y + q.height), q.y - (p.y + p.height)));
             items.forEach(it => {
@@ -7077,8 +7078,13 @@
                 }
                 if (!inner.length) return;
                 // Остриё выноски позиции этого цвета попадает в фигуру — значит, выноска у неё есть (контур и заливка бывают разными фигурами).
-                const tips = [...st.parcels.values()].filter(q => !q.orphan && cands.includes(q.pos) && q.pt[0] >= b.x && q.pt[0] <= b.x + b.width && q.pt[1] >= b.y && q.pt[1] <= b.y + b.height);
-                if (tips.some(q => paths.some(p => p.isPointInFill(new DOMPoint(q.pt[0], q.pt[1])) || p.isPointInStroke(new DOMPoint(q.pt[0], q.pt[1]))))) return;
+                // Точка выноски может стоять на самой кромке фигуры, поэтому проверяем и её окрестность (30 см).
+                const R = 0.3, ring = [[0, 0], [R, 0], [-R, 0], [0, R], [0, -R], [R, R], [R, -R], [-R, R], [-R, -R]];
+                const tips = [...st.parcels.values()].filter(q => !q.orphan && cands.includes(q.pos) && q.pt[0] >= b.x - R && q.pt[0] <= b.x + b.width + R && q.pt[1] >= b.y - R && q.pt[1] <= b.y + b.height + R);
+                const touches = q => ring.some(([dx, dy]) => { const pt = new DOMPoint(q.pt[0] + dx, q.pt[1] + dy); return paths.some(p => p.isPointInFill(pt) || p.isPointInStroke(pt)); });
+                if (tips.some(touches)) return;
+                // Цветник/кусты (штуки) с выноской другой позиции внутри — обычно приствольная лунка дерева или подложка под ним.
+                if (!cands.some(m2) && [...st.parcels.values()].some(q => !q.orphan && q.pt[0] >= b.x && q.pt[0] <= b.x + b.width && q.pt[1] >= b.y && q.pt[1] <= b.y + b.height && touches(q))) return;
                 const covered = inner.filter(([x, y]) => items.some(it => x >= it.b.x && x <= it.b.x + it.b.width && y >= it.b.y && y <= it.b.y + it.b.height
                     && [...it.g.querySelectorAll('path[fill]')].some(p => p.getAttribute('fill') !== 'none' && p.isPointInFill(new DOMPoint(x, y))))).length;
                 if (covered / inner.length > 0.4) return;
@@ -7104,7 +7110,6 @@
                 // Выноска соседнего участка того же типа часто считает оба куска сразу (проектировщик нарисовал газон
                 // двумя фигурами, а выноску поставил одну). Если в выноске соседа площади больше, чем нарисовано под её
                 // стрелкой, и этот запас покрывает фигуру, — фигура часть того участка, а не забытая.
-                const m2 = p => /м2|м²|кв\.?\s*м/i.test(units[p] || '');
                 const boxOf = q => q.els.map(e => e.getBBox()).reduce((u, r) => ({ x: Math.min(u.x, r.x), y: Math.min(u.y, r.y), width: Math.max(u.x + u.width, r.x + r.width) - Math.min(u.x, r.x), height: Math.max(u.y + u.height, r.y + r.height) - Math.min(u.y, r.y) }));
                 const host = [...st.parcels.values()]
                     .filter(q => !q.orphan && cands.includes(q.pos) && m2(q.pos) && q.els.length && gap(b, boxOf(q)) < 0.5)
@@ -7114,6 +7119,21 @@
                     })
                     .filter(h => h.spare >= pr.area * 0.5)
                     .sort((x, y) => y.spare - x.spare)[0];
+                // Цветники и кусты считают штуками: кусок того же цвета вплотную к участку с выноской — это его же контур
+                // или продолжение (проектировщик нарисовал клумбу двумя фигурами), отдельной выноски ему не нужно.
+                const overlap = (p, q) => {
+                    const w = Math.min(p.x + p.width, q.x + q.width) - Math.max(p.x, q.x), h = Math.min(p.y + p.height, q.y + q.height) - Math.max(p.y, q.y);
+                    return w > 0 && h > 0 ? w * h / Math.min(p.width * p.height, q.width * q.height) : 0;
+                };
+                const twin = host ? null : [...st.parcels.values()]
+                    .filter(q => !q.orphan && cands.includes(q.pos) && !m2(q.pos) && gap(b, boxOf(q)) < 0.5 && (q.els.some(e => fillOf(e) === fill) || overlap(b, boxOf(q)) > 0.5))
+                    .sort((x, y) => gap(b, boxOf(x)) - gap(b, boxOf(y)))[0];
+                if (twin) {
+                    twin.els.push(g);
+                    st.parcelOf.set(g, [twin.key]);
+                    st.parcelArea.set(g, b.width * b.height);
+                    return;
+                }
                 if (host) {
                     const q = host.q;
                     q.absorbed = (q.absorbed || 0) + pr.area;

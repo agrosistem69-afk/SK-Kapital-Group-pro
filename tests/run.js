@@ -276,6 +276,12 @@ test('По зонам: участок без выноски найден, под
     let rows0 = await page.evaluate(() => zonesPickedRows());
     expect(rows0.length === 1 && rows0[0].pos === '3' && rows0[0].qty === 40 && !rows0[0].orphans, 'кусок газона при общей выноске 40 м²: ' + JSON.stringify(rows0));
     await page.mouse.click(px, py);
+    // Кромка клумбы (штучная позиция) отдельной фигурой без выноски — выбирается вместе с клумбой, не «без выноски».
+    const [ex, ey] = await planToScreen(page, 30, 38.5);
+    await page.mouse.click(ex, ey);
+    const rowsE = await page.evaluate(() => zonesPickedRows());
+    expect(rowsE.length === 1 && rowsE[0].pos === '2' && rowsE[0].qty === 200 && !rowsE[0].orphans, 'кромка клумбы 200 шт.: ' + JSON.stringify(rowsE));
+    await page.mouse.click(ex, ey);
     const [sx, sy] = await planToScreen(page, 75, 52.5);
     await page.mouse.click(sx, sy);
     const rows = await page.evaluate(() => zonesPickedRows());
