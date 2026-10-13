@@ -122,7 +122,7 @@ test('Нижнее меню: Проекты, Чертежи, Объёмы, Ещ�
     expect(!nav.includes('Бухгалтерия') && !nav.includes('ПТО'), 'Бухгалтерия и ПТО должны быть в «Ещё», а не в нижнем меню');
     await page.evaluate(() => openModal('mobileMenuModal'));
     const more = await page.$eval('#mobileMenuModal', m => m.innerText);
-    expect(more.includes('Бухгалтерия') && more.includes('ПТО'), 'в меню «Ещё» нет Бухгалтерии или ПТО');
+    expect(more.includes('Бухгалтерия') && more.includes('ПТО') && more.includes('План-график'), 'в меню «Ещё» нет Бухгалтерии, ПТО или План-графика');
 });
 
 test('Роли: бухгалтер загружает документы 1С, ПТО — нет', async () => {
@@ -282,8 +282,141 @@ test('Кнопки «?» открывают подсказки', async () => {
     expect(await visible(page, '#helpModal'), 'подсказка «По зонам» не открылась');
 });
 
+// План-график. Сегодняшнюю дату в тестах задаём сами, чтобы расчёты не зависели от дня запуска.
+async function openSchedule(page, today) {
+    await page.evaluate(t => { window.__scheduleToday = t; appData.currentProjectId = 'p1'; }, today);
+    await page.evaluate(() => showScheduleScreen());
+    await page.waitForFunction(() => scheduleState.projectId === 'p1');
+}
+// Одна работа: 100 шт, 1 человек делает 10 в смену, бригада 2 → 20 в день, 5 рабочих дней пн 05.10 – пт 09.10.
+function seedScheduleItem(page, settings) {
+    return page.evaluate(settings => {
+        __db.schedule_settings.push({ project_id: 'p1', workdays: 6, ...settings });
+        __db.schedule_items.push({ id: 'w1', project_id: 'p1', sort_order: 1, section: 'Озеленение', name: 'Посадка кустарников', unit: 'шт', qty: 100, norm: 10, crew: 2, machine: 'Мини-погрузчик', machine_count: 1, start_date: '2026-10-05', end_date: '2026-10-09' });
+    }, settings);
+}
+
+test('План-график: составляется из объёмов по нормам выработки', async () => {
+    const page = await openApp({ admin: true });
+    await page.evaluate(() => showVolumesScreen());
+    await importFromDrawings(page);
+    await openSchedule(page, '2026-10-12');
+    expect((await page.$eval('#scheduleSummary', e => e.innerText)).includes('Графика пока нет'), 'пустой график должен подсказывать, с чего начать');
+    await page.click('#scheduleScreen >> text=Из объёмов');
+    await page.waitForSelector('#schGenPreview table');
+    await page.fill('#schGenStart', '2026-10-12');
+    await page.evaluate(() => renderScheduleGenPreview());
+    expect(await page.$eval('#schGenEnd', e => e.textContent) === '15.10.2026', 'окончание по плану должно быть 15.10.2026, получено ' + await page.$eval('#schGenEnd', e => e.textContent));
+    expect(await page.$eval('#schGenPeak', e => e.textContent) === '8', 'в пиковый день ожидалось 8 чел.');
+    // «Подобрать людей под срок»: срок 14.10 — спирею надо сделать за 1 день, значит людей больше.
+    await page.fill('#schGenDeadline', '2026-10-14');
+    await page.check('#schGenFit');
+    expect(await page.$eval('#schGenEnd', e => e.textContent) === '14.10.2026', 'с подбором людей график не уложился в срок: ' + await page.$eval('#schGenEnd', e => e.textContent));
+    expect(+(await page.$eval('#schGenPeak', e => e.textContent)) > 8, 'под срок людей должно стать больше 8');
+    await page.uncheck('#schGenFit');
+    await page.click('#schGenSave');
+    await page.waitForFunction(() => document.getElementById('scheduleModal').classList.contains('hidden'));
+    const items = await page.evaluate(() => Object.fromEntries(__db.schedule_items.map(i => [i.name, [i.qty, i.norm, i.crew, i.start_date, i.end_date, i.machine]])));
+    const sp = items['Посадка кустарников: Спирея тестовая'];
+    expect(Object.keys(items).length === 4, 'ожидалось 4 работы, получено ' + Object.keys(items).join(', '));
+    expect(sp && sp[0] === 200 && sp[1] === 30 && sp[2] === 4 && sp[3] === '2026-10-12' && sp[4] === '2026-10-13', 'спирея: ожидалось 200 шт, норма 30, 4 чел., 12–13.10, получено ' + JSON.stringify(sp));
+    const tree = items['Посадка деревьев: Клен тестовый'];
+    expect(tree && tree[5] === 'Кран-манипулятор', 'для деревьев ожидался кран-манипулятор: ' + JSON.stringify(tree));
+    const lawn = items['Укладка рулонного газона: Газон рулонный тестовый'];
+    expect(lawn && lawn[3] === '2026-10-14', 'газон должен начинаться после посадок, 14.10: ' + JSON.stringify(lawn));
+    expect(await page.evaluate(() => __db.schedule_settings[0]?.deadline) === '2026-10-14', 'срок сдачи не сохранился в настройках');
+    // Повторно — без дублей.
+    await page.evaluate(() => openScheduleGenerate());
+    await page.waitForSelector('#schGenPreview table');
+    await page.evaluate(() => saveScheduleGenerate());
+    await page.waitForFunction(() => document.getElementById('scheduleModal').classList.contains('hidden'));
+    expect(await page.evaluate(() => __db.schedule_items.length) === 4, 'повторное «Из объёмов» создало дубли');
+    expect(await page.$$eval('#scheduleGantt .schedule-row', r => r.length) === 4, 'на диаграмме должно быть 4 строки');
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
+test('План-график: факт, отставание и что добавить, чтобы успеть', async () => {
+    const page = await openApp();
+    await seedScheduleItem(page, { deadline: '2026-10-09', people_available: 3 });
+    // Пн и вт сделали по 10 вместо 20, среду вносим через форму.
+    await page.evaluate(() => __db.schedule_progress.push(
+        { id: 'f1', item_id: 'w1', project_id: 'p1', work_date: '2026-10-05', qty: 10, people: 2 },
+        { id: 'f2', item_id: 'w1', project_id: 'p1', work_date: '2026-10-06', qty: 10, people: 2 }));
+    await openSchedule(page, '2026-10-08');
+    await page.click('#scheduleScreen >> text=Внести выполнение');
+    await page.fill('#schFactDate', '2026-10-07');
+    await page.fill('.schedule-fact-row[data-item="w1"] .sch-fact-qty', '10');
+    await page.fill('.schedule-fact-row[data-item="w1"] .sch-fact-people', '2');
+    await page.click('#schFactSave');
+    await page.waitForFunction(() => document.getElementById('scheduleModal').classList.contains('hidden'));
+    expect(await page.evaluate(() => __db.schedule_progress.length) === 3, 'запись о выполнении не сохранилась');
+    const s = await page.evaluate(() => scheduleItemStats(scheduleState.items[0], scheduleState.progress, '2026-10-08', 6));
+    // К утру четверга план 60, сделано 30: отстаём на 30 шт = 1,5 дня. Темп 10/день → остаток 70 до 15.10.
+    expect(s.done === 30 && Math.round(s.pct * 100) === 30, 'сделано должно быть 30 (30%), получено ' + s.done);
+    expect(s.planToDate === 60 && s.lag === 30 && s.lagDays === 1.5, `отставание: ожидалось план 60, отстаём 30 шт / 1,5 дн., получено ${s.planToDate} / ${s.lag} / ${s.lagDays}`);
+    expect(s.forecastEnd === '2026-10-15' && s.late, 'прогноз окончания должен быть 15.10, получено ' + s.forecastEnd);
+    expect(s.neededPeople === 4 && s.extraPeople === 2 && s.extraMachines === 1, `чтобы успеть, нужно 4 чел. (+2) и +1 техника, получено ${s.neededPeople} (+${s.extraPeople}), техника +${s.extraMachines}`);
+    const advice = await page.$eval('#scheduleAdviceBox', e => e.innerText);
+    expect(advice.includes('нужно 4 чел. вместо 2 (+2)') && advice.includes('+1 Мини-погрузчик'), 'в советах нет «нужно 4 чел. вместо 2 (+2)» и техники: ' + advice);
+    expect(advice.includes('позже срока сдачи') && advice.includes('Не хватает 1 чел.'), 'в советах нет прогноза по сроку сдачи и нехватки людей: ' + advice);
+    expect(await page.$eval('[data-people-today]', e => e.textContent) === '4', 'людей сегодня должно быть нужно 4');
+    // Excel: в файле график и выполнение по дням.
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#scheduleScreen >> text=Excel')]);
+    const wb = XLSX.read(fs.readFileSync(await dl.path()));
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets['План-график'], { header: 1 });
+    const row = rows.find(r => r[1] === 'Посадка кустарников');
+    expect(row && row[4] === 30 && row[12] === '15.10.2026' && row[15] === 4, 'строка в Excel неверна: ' + JSON.stringify(row));
+    expect(XLSX.utils.sheet_to_json(wb.Sheets['Выполнение'], { header: 1 }).length === 4, 'на листе «Выполнение» должно быть 3 записи');
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
+test('План-график: работа ещё не началась, но по плану в срок не укладывается', async () => {
+    const page = await openApp();
+    await seedScheduleItem(page, {});
+    await page.evaluate(() => { __db.schedule_items[0].end_date = '2026-10-07'; });   // 3 дня вместо нужных 5
+    await openSchedule(page, '2026-10-01');
+    const s = await page.evaluate(() => scheduleItemStats(scheduleState.items[0], [], '2026-10-01', 6));
+    expect(s.status === 'notstarted' && s.late && s.forecastEnd === '2026-10-09' && s.neededPeople === 4, 'ожидалось: не начато, закончим 09.10, нужно 4 чел., получено ' + JSON.stringify(s));
+    const advice = await page.$eval('#scheduleAdviceBox', e => e.innerText);
+    expect(advice.includes('не укладывается в срок по плану') && advice.includes('нужно 4 чел.') && !advice.includes('отстаёт на 0'), 'неверный совет: ' + advice);
+});
+
+test('План-график: прораб вносит выполнение, но не меняет план', async () => {
+    const page = await openApp({ role: 'worker' });
+    await seedScheduleItem(page, {});
+    await openSchedule(page, '2026-10-06');
+    expect(await visible(page, '#scheduleScreen >> text=Внести выполнение'), 'прорабу не видна кнопка «Внести выполнение»');
+    expect(!(await visible(page, '#scheduleScreen >> text=Из объёмов')), 'прорабу видна кнопка «Из объёмов»');
+    expect(!(await visible(page, '#scheduleScreen >> text=Сроки и люди')), 'прорабу видна кнопка «Сроки и люди»');
+    await page.click('.schedule-row[data-item="w1"]');
+    expect(await page.$eval('#schItemQty', e => e.disabled) && !(await page.$('#schItemSave')), 'прораб может менять план работы');
+    const acc = await openApp({ role: 'accountant' });
+    await openSchedule(acc, '2026-10-06');
+    expect(!(await visible(acc, '#scheduleScreen >> text=Внести выполнение')), 'бухгалтеру видна кнопка «Внести выполнение»');
+});
+
+test('План-график на телефоне: диаграмма, люди по неделям, подсказка', async () => {
+    const page = await openApp({ width: 390, height: 800 });
+    await seedScheduleItem(page, { people_available: 1 });
+    await openSchedule(page, '2026-10-06');
+    expect(await page.$$eval('#scheduleGantt .schedule-row', r => r.length) === 1, 'на телефоне не видна диаграмма');
+    expect(await page.$$eval('.schedule-week', w => w.map(x => +x.dataset.people)).then(p => p.includes(2)), 'в неделе 05.10 по графику должно быть 2 чел.');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth) <= 390, 'страница шире экрана телефона');
+    await page.click('#scheduleScreen button[title^="Подсказка"]');
+    expect((await page.$eval('#helpModalBody', e => e.innerText)).includes('Внести выполнение'), 'подсказка «План-график» не открылась');
+    // Работа открывается нажатием на строку и сама считает окончание.
+    await page.evaluate(() => closeModal('helpModal'));
+    await page.click('.schedule-row[data-item="w1"]');
+    await page.fill('#schItemCrew', '4');
+    await page.dispatchEvent('#schItemCrew', 'input');
+    expect(await page.$eval('#schItemEnd', e => e.value) === '2026-10-07', 'при 4 чел. работа 100 шт должна закончиться 07.10');
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
 // ================= ЗАПУСК =================
-(async () => {
+// Для снимков экрана файл можно подключить из другого скрипта: тогда проверки не запускаются.
+module.exports = { openApp, openSchedule, start: async () => { css = buildCss(); const server = await startServer(); baseUrl = `http://127.0.0.1:${server.address().port}`; browser = await chromium.launch(); return { server, browser }; } };
+if (require.main === module) (async () => {
     css = buildCss();
     const server = await startServer();
     baseUrl = `http://127.0.0.1:${server.address().port}`;

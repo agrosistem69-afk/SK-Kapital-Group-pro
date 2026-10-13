@@ -288,6 +288,39 @@
             <div id="volumesList" class="space-y-2"></div>
         </div>
 
+
+        <!-- План-график работ объекта: сроки по видам работ, факт, отставание и прогноз по людям и технике -->
+        <div id="scheduleScreen" class="hidden flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-40">
+            <button id="scheduleBackToProject" onclick="openProject(appData.currentProjectId)" class="hidden text-sm text-brand-600 hover:text-brand-700 font-semibold mb-2"><i class="fa-solid fa-arrow-left mr-1"></i> <span></span></button>
+            <div class="flex items-center gap-2 mb-1">
+                <h2 class="text-xl font-bold text-slate-900">План-график</h2>
+                <button onclick="showHelp('schedule')" title="Подсказка: как здесь всё работает" class="w-7 h-7 rounded-full border-2 border-brand-600 text-brand-600 hover:bg-brand-50 text-sm font-bold flex items-center justify-center">?</button>
+            </div>
+            <p class="text-sm text-slate-500 mb-4">Сроки по видам работ, сколько сделано, успеваем ли и сколько нужно людей и техники.</p>
+            <select id="scheduleProjectFilter" onchange="renderSchedule()" class="bg-white border border-slate-300 rounded-lg text-sm px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-brand-500"></select>
+            <div class="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 mb-4">
+                <button onclick="openScheduleFactForm()" class="schedule-report-only hidden bg-brand-600 hover:bg-brand-700 text-white px-3 py-2 rounded-lg text-sm font-semibold items-center justify-center gap-2 shadow-sm transition-colors">
+                    <i class="fa-solid fa-clipboard-check"></i> Внести выполнение
+                </button>
+                <button onclick="openScheduleGenerate()" class="schedule-plan-only hidden bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold items-center justify-center gap-2 transition-colors">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> Из объёмов
+                </button>
+                <button onclick="openScheduleItem()" class="schedule-plan-only hidden bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold items-center justify-center gap-2 transition-colors">
+                    <i class="fa-solid fa-plus"></i> Работа
+                </button>
+                <button onclick="openScheduleSettings()" class="schedule-plan-only hidden bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold items-center justify-center gap-2 transition-colors">
+                    <i class="fa-solid fa-sliders"></i> Сроки и люди
+                </button>
+                <button onclick="exportScheduleExcel()" class="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-colors">
+                    <i class="fa-solid fa-file-excel"></i> Excel
+                </button>
+            </div>
+            <div id="scheduleSummary" class="mb-4"></div>
+            <div id="scheduleAdvice" class="mb-4"></div>
+            <div id="scheduleGantt" class="mb-4"></div>
+            <div id="scheduleResources" class="mb-4"></div>
+        </div>
+
         <!-- Экран "Бухгалтерия" — единая лента накладных/УПД со всех проектов -->
         <div id="accountingScreen" class="hidden flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-40">
             <h2 class="text-xl font-bold text-slate-900 mb-1">Бухгалтерия</h2>
@@ -498,6 +531,9 @@
                         <i class="fa-solid fa-envelope"></i><span>Email</span>
                     </button>
                     -->
+                    <button onclick="showScheduleScreen()" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors shadow-sm flex items-center gap-2">
+                        <i class="fa-solid fa-chart-gantt"></i><span>План-график</span>
+                    </button>
                     <button id="pdfReportBtn" onclick="openModal('reportOptionsModal')" class="bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors shadow-sm flex items-center gap-2">
                         <i class="fa-solid fa-file-pdf"></i><span>Скачать PDF</span>
                     </button>
@@ -1694,6 +1730,17 @@
         </div>
     </div>
 
+    <!-- Общее окно раздела «План-график» -->
+    <div id="scheduleModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-xl shadow-xl max-w-3xl w-full overflow-hidden">
+            <div class="bg-slate-900 px-6 py-4 text-white flex justify-between items-center gap-3">
+                <h3 id="scheduleModalTitle" class="font-bold text-lg truncate"></h3>
+                <button onclick="closeModal('scheduleModal')" class="text-slate-400 hover:text-white transition-colors"><i class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+            <div id="scheduleModalBody" class="p-5 max-h-[75vh] overflow-y-auto custom-scrollbar"></div>
+        </div>
+    </div>
+
     <!-- Общее окно раздела «Объёмы»: карточка материала, формы, предпросмотр загрузки -->
     <div id="volumesModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
         <div class="bg-white rounded-xl shadow-xl max-w-3xl w-full overflow-hidden">
@@ -1731,6 +1778,11 @@
                 </div>
                 <div data-roles="manager,worker,lead,pto" class="hidden px-5 pt-4 pb-1 text-[11px] font-bold text-slate-400 uppercase tracking-wide">Разделы объекта</div>
                 <div class="divide-y divide-slate-100 border-b border-slate-100">
+                    <button data-roles="manager,worker,lead,pto" onclick="closeModal('mobileMenuModal'); showScheduleScreen()" class="hidden w-full items-center gap-4 px-5 py-4 text-left hover:bg-slate-50 transition-colors">
+                        <div class="w-10 h-10 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-chart-gantt"></i></div>
+                        <span class="text-sm font-medium text-slate-800 flex-1">План-график</span>
+                        <i class="fa-solid fa-chevron-right text-slate-300 text-xs"></i>
+                    </button>
                     <button data-roles="manager,worker,lead" onclick="openProjectSection('ordersSection')" class="hidden w-full items-center gap-4 px-5 py-4 text-left hover:bg-slate-50 transition-colors">
                         <div class="w-10 h-10 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-cart-shopping"></i></div>
                         <span class="text-sm font-medium text-slate-800 flex-1">Заказать</span>
@@ -2326,7 +2378,7 @@
         function setActiveNavTab(tab) {
             // Бухгалтерия и ПТО открываются из «Ещё», поэтому подсвечиваем «Ещё».
             const map = { projects: 'navProjectsBtn', more: 'navMoreBtn', drawings: 'navDrawingsBtn', volumes: 'navVolumesBtn' };
-            if (tab === 'accounting' || tab === 'pto') tab = 'more';
+            if (tab === 'accounting' || tab === 'pto' || tab === 'schedule') tab = 'more';
             Object.entries(map).forEach(([key, id]) => {
                 const btn = document.getElementById(id);
                 if (!btn) return;
@@ -2339,7 +2391,7 @@
 
         function showBoardsScreen() {
             document.getElementById('drawingsScreen').classList.add('hidden');
-            document.getElementById('volumesScreen').classList.add('hidden');
+            document.getElementById('volumesScreen').classList.add('hidden'); document.getElementById('scheduleScreen').classList.add('hidden');
             document.getElementById('boardsScreen').classList.remove('hidden');
             document.getElementById('boardsScreen').classList.add('flex-grow');
             document.getElementById('projectView').classList.add('hidden');
@@ -2352,7 +2404,7 @@
 
         function openProject(projId) {
             document.getElementById('drawingsScreen').classList.add('hidden');
-            document.getElementById('volumesScreen').classList.add('hidden');
+            document.getElementById('volumesScreen').classList.add('hidden'); document.getElementById('scheduleScreen').classList.add('hidden');
             switchProject(projId);
             document.getElementById('boardsScreen').classList.add('hidden');
             document.getElementById('projectView').classList.remove('hidden');
@@ -3564,7 +3616,7 @@
         // -------------------- ЭКРАН "БУХГАЛТЕРИЯ" --------------------
         async function showAccountingScreen() {
             document.getElementById('drawingsScreen').classList.add('hidden');
-            document.getElementById('volumesScreen').classList.add('hidden');
+            document.getElementById('volumesScreen').classList.add('hidden'); document.getElementById('scheduleScreen').classList.add('hidden');
             document.getElementById('boardsScreen').classList.add('hidden');
             document.getElementById('projectView').classList.add('hidden');
             document.getElementById('accountingScreen').classList.remove('hidden');
@@ -5590,7 +5642,7 @@
             const fromProject = !document.getElementById('projectView').classList.contains('hidden')
                 || (!document.getElementById('drawingsScreen').classList.contains('hidden') && drawingsScreenProjectOnly)
                 || (!document.getElementById('volumesScreen').classList.contains('hidden') && volumesScreenProjectOnly);
-            ['boardsScreen', 'projectView', 'accountingScreen', 'ptoScreen', 'volumesScreen'].forEach(id => document.getElementById(id).classList.add('hidden'));
+            ['boardsScreen', 'projectView', 'accountingScreen', 'ptoScreen', 'volumesScreen', 'scheduleScreen'].forEach(id => document.getElementById(id).classList.add('hidden'));
             document.getElementById('drawingsScreen').classList.remove('hidden');
             document.getElementById('createProjectFab').classList.add('hidden');
             setActiveNavTab('drawings');
@@ -5685,7 +5737,7 @@
             const fromProject = !document.getElementById('projectView').classList.contains('hidden')
                 || (!document.getElementById('volumesScreen').classList.contains('hidden') && volumesScreenProjectOnly)
                 || (!document.getElementById('drawingsScreen').classList.contains('hidden') && drawingsScreenProjectOnly);
-            ['boardsScreen', 'projectView', 'accountingScreen', 'ptoScreen', 'drawingsScreen'].forEach(id => document.getElementById(id).classList.add('hidden'));
+            ['boardsScreen', 'projectView', 'accountingScreen', 'ptoScreen', 'drawingsScreen', 'scheduleScreen'].forEach(id => document.getElementById(id).classList.add('hidden'));
             document.getElementById('volumesScreen').classList.remove('hidden');
             document.getElementById('createProjectFab').classList.add('hidden');
             setActiveNavTab('volumes');
@@ -7139,6 +7191,756 @@
         }
 
         // ---- Подсказки «?» ----
+        // -------------------- ПЛАН-ГРАФИК РАБОТ --------------------
+        // Строка графика — вид работ с объёмом, выработкой на человека, людьми и техникой и сроками.
+        // Ежедневный факт (сколько сделали, сколько людей вышло) даёт процент, отставание и прогноз:
+        // когда закончим при нынешнем темпе и сколько людей и техники нужно, чтобы успеть к сроку.
+        let scheduleState = { projectId: null, settings: null, items: [], progress: [] };
+        let scheduleScreenProjectOnly = false;
+
+        // Даты храним строками «ГГГГ-ММ-ДД» и считаем в UTC, чтобы не мешали часовые пояса.
+        const sdParse = s => { const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d); };
+        const sdFmt = t => new Date(t).toISOString().slice(0, 10);
+        const sdAdd = (s, n) => sdFmt(sdParse(s) + n * 86400000);
+        const sdDays = (a, b) => Math.round((sdParse(b) - sdParse(a)) / 86400000);
+        const sdShow = s => s ? `${s.slice(8, 10)}.${s.slice(5, 7)}` : '—';
+        const sdMax = (...l) => l.filter(Boolean).sort().pop() || null;
+        const sdMin = (...l) => l.filter(Boolean).sort()[0] || null;
+        function sdIsWork(s, wd) {
+            const d = new Date(sdParse(s)).getUTCDay();
+            return wd >= 7 || (wd === 6 ? d !== 0 : d !== 0 && d !== 6);
+        }
+        function sdNextWork(s, wd) { while (!sdIsWork(s, wd)) s = sdAdd(s, 1); return s; }
+        // Последний день работы длиной n рабочих дней, если начать в день s.
+        function sdAddWorkdays(s, n, wd) {
+            s = sdNextWork(s, wd);
+            for (let left = Math.max(1, Math.ceil(n - 1e-9)); left > 1; left--) s = sdNextWork(sdAdd(s, 1), wd);
+            return s;
+        }
+        // Сколько рабочих дней с a по b включительно.
+        function sdWorkdays(a, b, wd) {
+            let n = 0;
+            for (let s = a; s <= b; s = sdAdd(s, 1)) if (sdIsWork(s, wd)) n++;
+            return n;
+        }
+        function scheduleToday() {
+            if (window.__scheduleToday) return window.__scheduleToday;
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        }
+        const scheduleWd = () => Number(scheduleState.settings?.workdays) || 6;
+        const canPlanSchedule = () => ['manager', 'lead'].includes(currentUserRole);
+        const canReportSchedule = () => ['manager', 'lead', 'worker', 'pto'].includes(currentUserRole);
+
+        // Справочник выработки: сколько делает 1 человек за смену, обычная бригада и техника.
+        // phase — очерёдность внутри раздела: сначала основание, потом бортовой камень, покрытия, посадки, газон, мульча.
+        // Это средние значения для старта, у каждой работы их можно поправить вручную.
+        const SCHEDULE_NORMS = [
+            { re: /рулон/i, work: 'Укладка рулонного газона', phase: 5, norms: { 'м²': 120 }, crew: 4 },
+            { re: /газон|травосмес|травян/i, work: 'Устройство газона', phase: 5, norms: { 'м²': 400, 'кг': 15 }, crew: 2, machine: 'Мотоблок' },
+            { re: /мульч|кора\b|щеп/i, work: 'Мульчирование', phase: 6, norms: { 'м²': 50, 'м³': 5 }, crew: 2 },
+            { re: /борт|бордюр|поребрик/i, work: 'Установка бортового камня', phase: 2, norms: { 'м.п.': 25, 'шт': 25 }, crew: 3 },
+            { re: /плитк|брусчат|покрыти|асфальт|резинов|гранит/i, work: 'Устройство покрытия', phase: 3, norms: { 'м²': 12 }, crew: 4, machine: 'Виброплита' },
+            { re: /грунт|земл|торф|песок|песк|щебен|щебён|планировк|подготовк|геотекст|выемк/i, work: 'Подготовка основания', phase: 1, norms: { 'м³': 6, 'м²': 100, 'т': 4 }, crew: 3, machine: 'Мини-погрузчик' },
+            { re: /туя|туи|можжев|хвойн.*куст|тис\b|микробиот/i, work: 'Посадка хвойных', phase: 4, norms: { 'шт': 15 }, crew: 3 },
+            { re: /дерев|клён|клен|липа|липы|\bдуб|берёз|берез|рябин|яблон|каштан|\bвяз|сосн|\bел[ьи]\b|лиственниц|черёмух|черемух|груш|вишн|слив|\bива\b|ивы\b|тополь|ясен|акаци/i, work: 'Посадка деревьев', phase: 4, norms: { 'шт': 3 }, crew: 4, machine: 'Кран-манипулятор' },
+            { re: /кустарн|спире|дерен|дёрен|барбарис|кизильник|гортенз|сирен|\bроз[аы]|чубушник|пузыреплод|лапчатк|самшит|бирючин|изгород|бересклет|снежноягод|калин/i, work: 'Посадка кустарников', phase: 4, norms: { 'шт': 30, 'м²': 20 }, crew: 4 },
+            { re: /многолет|цвет|лукович|тюльпан|нарцис|гейхер|хост[аы]|злак|лилейник|шалфе|котовник|почвопокров|овсяниц|мискантус|астильб|ирис|пион|однолет/i, work: 'Посадка многолетников', phase: 4, norms: { 'шт': 150, 'м²': 15 }, crew: 3 },
+        ];
+        const SCHEDULE_UNIT_NORMS = { 'шт': 20, 'м²': 50, 'м³': 6, 'м.п.': 30, 'т': 4, 'кг': 100 };
+        function scheduleUnit(u) {
+            const s = String(u || '').trim().toLowerCase().replace(/\s+/g, '');
+            if (/^(м2|м²|кв\.?м\.?)$/.test(s)) return 'м²';
+            if (/^(м3|м³|куб\.?м\.?)$/.test(s)) return 'м³';
+            if (/^(м\.?п\.?|п\.?м\.?|пог\.?м\.?|м)$/.test(s)) return 'м.п.';
+            if (/^шт/.test(s)) return 'шт';
+            if (/^т(н|онн)?\.?$/.test(s)) return 'т';
+            return s || 'шт';
+        }
+        function scheduleNormFor(material) {
+            const text = `${material.category || ''} ${material.name || ''}`;
+            const unit = scheduleUnit(material.unit);
+            const rule = SCHEDULE_NORMS.find(r => r.re.test(text));
+            const norm = (rule && rule.norms[unit]) || SCHEDULE_UNIT_NORMS[unit] || 10;
+            return {
+                work: rule ? rule.work : 'Работы', phase: rule ? rule.phase : 4, norm,
+                crew: rule ? rule.crew : 3, machine: rule?.machine || '', machine_count: rule?.machine ? 1 : 0,
+            };
+        }
+
+        // Плановая выработка строки в день и трудоёмкость (человеко-дни), по которой взвешивается общий процент.
+        function scheduleItemPerDay(it, wd) {
+            const n = Number(it.norm) || 0, c = Number(it.crew) || 0;
+            if (n > 0 && c > 0) return n * c;
+            const days = it.start_date && it.end_date ? sdWorkdays(it.start_date, it.end_date, wd) : 0;
+            return days > 0 ? Number(it.qty) / days : 0;
+        }
+        function scheduleItemLabor(it, wd) {
+            const n = Number(it.norm) || 0;
+            if (n > 0) return Number(it.qty) / n;
+            const days = it.start_date && it.end_date ? sdWorkdays(it.start_date, it.end_date, wd) : 1;
+            return days * (Number(it.crew) || 1);
+        }
+
+        // Всё, что нужно руководителю по одной работе: сделано, отставание, прогноз окончания, нужно людей и техники.
+        function scheduleItemStats(it, progress, today, wd) {
+            const facts = progress.filter(p => p.item_id === it.id);
+            const qty = Number(it.qty) || 0;
+            const done = facts.reduce((s, p) => s + Number(p.qty || 0), 0);
+            const remaining = Math.max(0, qty - done);
+            const pct = qty > 0 ? Math.min(1, done / qty) : (done > 0 ? 1 : 0);
+            const r = { done, remaining, pct, planToDate: 0, lag: 0, lagDays: 0, pace: 0, forecastEnd: it.end_date, late: false, overdue: false, neededPeople: 0, extraPeople: 0, extraMachines: 0, status: 'ok' };
+            if (!it.start_date || !it.end_date) { r.status = remaining <= 0 && qty > 0 ? 'done' : 'nodates'; return r; }
+            const planDays = Math.max(1, sdWorkdays(it.start_date, it.end_date, wd));
+            const perDay = scheduleItemPerDay(it, wd) || qty / planDays;
+            // План «на сегодня» — сколько должно быть сделано к началу сегодняшнего дня.
+            const yesterday = sdAdd(today, -1);
+            r.planToDate = today <= it.start_date ? 0 : Math.min(qty, qty * sdWorkdays(it.start_date, sdMin(yesterday, it.end_date), wd) / planDays);
+            r.lag = Math.max(0, r.planToDate - done);
+            r.lagDays = perDay > 0 ? Math.round(r.lag / perDay * 10) / 10 : 0;
+            // Темп — средний факт за последние 7 дней с отчётами; если отчётов нет — плановый.
+            const byDate = {};
+            facts.forEach(p => { byDate[p.work_date] = (byDate[p.work_date] || 0) + Number(p.qty || 0); });
+            const dates = Object.keys(byDate).filter(d => byDate[d] > 0).sort().slice(-7);
+            r.pace = dates.length ? dates.reduce((s, d) => s + byDate[d], 0) / dates.length : perDay;
+            if (remaining <= 0 && qty > 0) {
+                r.status = 'done';
+                r.forecastEnd = Object.keys(byDate).sort().pop() || it.end_date;
+                return r;
+            }
+            const from = sdMax(today, it.start_date);
+            r.forecastEnd = r.pace > 0 ? sdAddWorkdays(from, remaining / r.pace, wd) : null;
+            r.late = !r.forecastEnd || r.forecastEnd > it.end_date;
+            r.overdue = today > it.end_date;
+            const perPerson = Number(it.norm) > 0 ? Number(it.norm) : perDay / Math.max(1, Number(it.crew) || 1);
+            const crew = Number(it.crew) || 0;
+            const daysLeft = r.overdue ? 0 : sdWorkdays(from, it.end_date, wd);
+            if (perPerson > 0 && daysLeft > 0) r.neededPeople = Math.ceil(remaining / (perPerson * daysLeft) - 1e-9);
+            if (r.late && r.neededPeople > crew) {
+                r.extraPeople = r.neededPeople - crew;
+                const mc = Number(it.machine_count) || 0;
+                if (mc > 0 && crew > 0) r.extraMachines = Math.ceil(mc * r.neededPeople / crew - 1e-9) - mc;
+            }
+            r.status = r.overdue ? 'overdue' : today < it.start_date ? 'notstarted' : r.late ? 'late' : 'ok';
+            return r;
+        }
+
+        function scheduleSummary() {
+            const { items, progress, settings } = scheduleState;
+            const today = scheduleToday(), wd = scheduleWd();
+            const stats = {};
+            items.forEach(it => { stats[it.id] = scheduleItemStats(it, progress, today, wd); });
+            let wSum = 0, wDone = 0;
+            items.forEach(it => { const w = scheduleItemLabor(it, wd); wSum += w; wDone += w * stats[it.id].pct; });
+            const planEnd = sdMax(...items.map(i => i.end_date));
+            const forecastEnd = sdMax(...items.map(i => stats[i.id].forecastEnd || i.end_date));
+            // Сколько людей нужно сегодня: по плану у идущих работ, у отстающих — сколько нужно, чтобы успеть.
+            let peopleToday = 0;
+            items.forEach(it => {
+                const s = stats[it.id];
+                if (s.status === 'done' || !it.start_date) return;
+                if (it.start_date <= today && (today <= it.end_date || s.remaining > 0))
+                    peopleToday += Math.max(Number(it.crew) || 0, s.late && !s.overdue ? s.neededPeople : 0);
+            });
+            const lastDate = progress.map(p => p.work_date).sort().pop() || null;
+            const lastPeople = lastDate ? progress.filter(p => p.work_date === lastDate).reduce((s, p) => s + Number(p.people || 0), 0) : 0;
+            return {
+                stats, today, wd, pct: wSum > 0 ? wDone / wSum : 0, planEnd, forecastEnd,
+                deadline: settings?.deadline || null, available: Number(settings?.people_available) || 0,
+                peopleToday, lastDate, lastPeople,
+                late: items.filter(i => stats[i.id].late || stats[i.id].overdue),
+            };
+        }
+
+        async function showScheduleScreen() {
+            const fromProject = !document.getElementById('projectView').classList.contains('hidden')
+                || (!document.getElementById('scheduleScreen').classList.contains('hidden') && scheduleScreenProjectOnly);
+            ['boardsScreen', 'projectView', 'accountingScreen', 'ptoScreen', 'drawingsScreen', 'volumesScreen'].forEach(id => document.getElementById(id).classList.add('hidden'));
+            document.getElementById('scheduleScreen').classList.remove('hidden');
+            document.getElementById('createProjectFab').classList.add('hidden');
+            setActiveNavTab('schedule');
+            document.querySelectorAll('.schedule-plan-only').forEach(el => { el.classList.toggle('hidden', !canPlanSchedule()); el.classList.toggle('flex', canPlanSchedule()); });
+            document.querySelectorAll('.schedule-report-only').forEach(el => { el.classList.toggle('hidden', !canReportSchedule()); el.classList.toggle('flex', canReportSchedule()); });
+
+            const sel = document.getElementById('scheduleProjectFilter');
+            const prev = sel.value;
+            sel.innerHTML = appData.projects.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+            const currentProj = fromProject && appData.projects.find(p => p.id === appData.currentProjectId);
+            scheduleScreenProjectOnly = !!currentProj;
+            if (currentProj) sel.value = currentProj.id;
+            else if (appData.projects.some(p => p.id === prev)) sel.value = prev;
+            else if (appData.projects.some(p => p.id === appData.currentProjectId)) sel.value = appData.currentProjectId;
+            sel.classList.toggle('hidden', !!currentProj);
+            const back = document.getElementById('scheduleBackToProject');
+            back.classList.toggle('hidden', !currentProj);
+            back.querySelector('span').textContent = currentProj ? currentProj.name : '';
+            await renderSchedule();
+        }
+
+        async function loadSchedule(projectId) {
+            const [s, i, p] = await Promise.all([
+                sb.from('schedule_settings').select('*').eq('project_id', projectId),
+                sb.from('schedule_items').select('*').eq('project_id', projectId).order('sort_order'),
+                sb.from('schedule_progress').select('*').eq('project_id', projectId).order('work_date'),
+            ]);
+            const error = s.error || i.error || p.error;
+            if (error) throw error;
+            const items = (i.data || []).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || String(a.start_date).localeCompare(String(b.start_date)));
+            scheduleState = { projectId, settings: (s.data || [])[0] || null, items, progress: p.data || [] };
+        }
+
+        const SCHEDULE_COLORS = {
+            done: { bar: 'bg-emerald-500', soft: 'bg-emerald-100', text: 'text-emerald-700', label: 'Готово' },
+            ok: { bar: 'bg-brand-600', soft: 'bg-brand-100', text: 'text-brand-700', label: 'По графику' },
+            notstarted: { bar: 'bg-slate-400', soft: 'bg-slate-200', text: 'text-slate-500', label: 'Не начато' },
+            late: { bar: 'bg-amber-500', soft: 'bg-amber-100', text: 'text-amber-700', label: 'Отстаёт' },
+            overdue: { bar: 'bg-rose-600', soft: 'bg-rose-100', text: 'text-rose-700', label: 'Срок прошёл' },
+            nodates: { bar: 'bg-slate-300', soft: 'bg-slate-100', text: 'text-slate-400', label: 'Нет сроков' },
+        };
+
+        async function renderSchedule() {
+            const ids = ['scheduleSummary', 'scheduleAdvice', 'scheduleGantt', 'scheduleResources'];
+            const [summaryEl, adviceEl, ganttEl, resEl] = ids.map(id => document.getElementById(id));
+            ids.forEach(id => { document.getElementById(id).innerHTML = ''; });
+            const projectId = document.getElementById('scheduleProjectFilter').value;
+            if (!projectId) { summaryEl.innerHTML = '<div class="text-sm text-slate-400 py-2">Нет доступных проектов</div>'; return; }
+            summaryEl.innerHTML = '<div class="text-xs text-slate-400 py-2">Загрузка...</div>';
+            try { await loadSchedule(projectId); }
+            catch (e) {
+                const missing = /schedule_|does not exist|relation/i.test(e.message || '');
+                summaryEl.innerHTML = `<div class="text-sm ${missing ? 'text-amber-700 bg-amber-50 border border-amber-200' : 'text-rose-600'} rounded-lg p-3">${missing ? 'План-график ещё не включён в базе. Руководителю нужно один раз выполнить файл supabase/schedule.sql в Supabase.' : 'Не удалось загрузить: ' + escapeHtml(e.message)}</div>`;
+                return;
+            }
+            const { items } = scheduleState;
+            if (!items.length) {
+                summaryEl.innerHTML = `<div class="bg-white rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+                    <i class="fa-solid fa-chart-gantt text-3xl text-slate-300 mb-2"></i>
+                    <div class="font-semibold text-slate-700 mb-1">Графика пока нет</div>
+                    ${canPlanSchedule() ? 'Нажмите «Из объёмов», и программа составит график по проектным объёмам и нормам выработки. Или добавьте работы по одной кнопкой «Работа».' : 'Его составляет руководитель.'}
+                </div>`;
+                return;
+            }
+            const sum = scheduleSummary();
+            summaryEl.innerHTML = scheduleSummaryHtml(sum);
+            adviceEl.innerHTML = scheduleAdviceHtml(sum);
+            ganttEl.innerHTML = scheduleGanttHtml(sum);
+            resEl.innerHTML = scheduleResourcesHtml(sum);
+            const today = ganttEl.querySelector('[data-today]');
+            const scroller = ganttEl.querySelector('.schedule-scroll');
+            if (today && scroller) scroller.scrollLeft = Math.max(0, today.offsetLeft - scroller.clientWidth / 2);
+        }
+
+        function scheduleSummaryHtml(sum) {
+            const deadlineLate = sum.deadline && sum.forecastEnd && sum.forecastEnd > sum.deadline;
+            const peopleShort = sum.available > 0 && sum.peopleToday > sum.available;
+            const card = (label, value, sub, cls = 'text-slate-900') => `
+                <div class="bg-white rounded-xl border border-slate-200 p-3">
+                    <div class="text-[11px] text-slate-500 uppercase tracking-wide font-semibold">${label}</div>
+                    <div class="text-xl font-bold ${cls}">${value}</div>
+                    ${sub ? `<div class="text-[11px] text-slate-500">${sub}</div>` : ''}
+                </div>`;
+            const pct = Math.round(sum.pct * 100);
+            return `<div id="scheduleCards" class="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                ${card('Выполнено', pct + '%', `<div class="h-1.5 bg-slate-100 rounded-full mt-1 overflow-hidden"><div class="h-full bg-emerald-500" style="width:${pct}%"></div></div>`)}
+                ${card('Срок сдачи', sum.deadline ? formatDateDisplay(sum.deadline) : '—', `по плану закончим ${sdShow(sum.planEnd)}`)}
+                ${card('Прогноз окончания', sdShow(sum.forecastEnd), deadlineLate ? `позже срока на ${sdDays(sum.deadline, sum.forecastEnd)} дн.` : sum.deadline ? 'успеваем к сроку' : 'при нынешнем темпе', deadlineLate ? 'text-rose-600' : 'text-emerald-600')}
+                ${card('Людей сегодня', `<span data-people-today>${sum.peopleToday}</span>${sum.available ? ' / ' + sum.available : ''}`, sum.available ? (peopleShort ? `не хватает ${sum.peopleToday - sum.available} чел.` : 'нужно / есть на объекте') : 'нужно по графику' + (sum.lastDate ? `, вышло ${sum.lastPeople} (${sdShow(sum.lastDate)})` : ''), peopleShort ? 'text-rose-600' : 'text-slate-900')}
+            </div>`;
+        }
+
+        // Советы руководителю: что отстаёт и что добавить, чтобы успеть.
+        function scheduleAdviceText(it, s) {
+            const u = escapeHtml(it.unit || '');
+            const name = `<b>${escapeHtml(it.name)}</b>`;
+            const doneTxt = `сделано ${fmtQty(s.done)} из ${fmtQty(it.qty)} ${u}`;
+            if (s.overdue) {
+                const wdays = scheduleWd();
+                const perPerson = Number(it.norm) || (s.pace / Math.max(1, Number(it.crew) || 1));
+                const weekPeople = perPerson > 0 ? Math.ceil(s.remaining / (perPerson * wdays) - 1e-9) : 0;
+                return `${name}: срок по плану ${sdShow(it.end_date)} прошёл, ${doneTxt}. При нынешнем темпе закончим ${sdShow(s.forecastEnd)}.${weekPeople ? ` Чтобы закончить за неделю, нужно ${weekPeople} чел.` : ''}`;
+            }
+            let t = s.lagDays > 0
+                ? `${name} отстаёт на ${fmtQty(s.lagDays)} раб. дн. (${doneTxt}). При нынешнем темпе закончим ${sdShow(s.forecastEnd)} вместо ${sdShow(it.end_date)}.`
+                : `${name} не укладывается в срок по плану: при ${Number(it.crew) || 0} чел. закончим ${sdShow(s.forecastEnd)} вместо ${sdShow(it.end_date)}.`;
+            if (s.extraPeople > 0) {
+                t += ` Чтобы успеть к ${sdShow(it.end_date)}, нужно <b>${s.neededPeople} чел.</b> вместо ${Number(it.crew) || 0} (+${s.extraPeople})`;
+                if (s.extraMachines > 0) t += ` и <b>+${s.extraMachines} ${escapeHtml(it.machine || 'ед. техники')}</b>`;
+                t += '.';
+            }
+            return t;
+        }
+        function scheduleAdviceHtml(sum) {
+            const lines = [];
+            if (sum.deadline && sum.forecastEnd && sum.forecastEnd > sum.deadline)
+                lines.push(`Прогноз окончания объекта <b>${formatDateDisplay(sum.forecastEnd)}</b>, это позже срока сдачи ${formatDateDisplay(sum.deadline)} на ${sdDays(sum.deadline, sum.forecastEnd)} дн.`);
+            if (sum.available > 0 && sum.peopleToday > sum.available)
+                lines.push(`Сегодня по графику нужно <b>${sum.peopleToday} чел.</b>, а на объекте ${sum.available}. Не хватает ${sum.peopleToday - sum.available} чел.`);
+            const late = [...sum.late].sort((a, b) => (sum.stats[b.id].overdue - sum.stats[a.id].overdue) || sum.stats[b.id].lagDays - sum.stats[a.id].lagDays);
+            late.forEach(it => lines.push(scheduleAdviceText(it, sum.stats[it.id])));
+            if (!lines.length)
+                return `<div id="scheduleAdviceBox" class="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-3 text-sm"><i class="fa-solid fa-circle-check mr-1"></i> Идём по графику. Отстающих работ нет.</div>`;
+            return `<div id="scheduleAdviceBox" class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-slate-800">
+                <div class="font-bold text-amber-800 mb-1.5"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Что требует внимания</div>
+                <ul class="space-y-1.5 list-disc pl-5">${lines.map(l => `<li>${l}</li>`).join('')}</ul>
+            </div>`;
+        }
+
+        // Диаграмма сроков: полоса — план, заливка — сделано, штрих — прогноз, если не успеваем.
+        function scheduleGanttHtml(sum) {
+            const { items, settings } = scheduleState;
+            const dated = items.filter(i => i.start_date && i.end_date);
+            if (!dated.length) return '';
+            const wd = sum.wd;
+            const from = sdAdd(sdMin(settings?.start_date, ...dated.map(i => i.start_date), sum.today), -1);
+            const to = sdAdd(sdMax(sum.deadline, sum.forecastEnd, ...dated.map(i => i.end_date)), 2);
+            const nDays = sdDays(from, to) + 1;
+            const dw = nDays <= 45 ? 22 : nDays <= 120 ? 12 : 6;
+            const W = nDays * dw;
+            const x = s => sdDays(from, s) * dw;
+            const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+            let monthsHtml = '', daysHtml = '', bgHtml = '';
+            for (let i = 0; i < nDays; i++) {
+                const d = sdAdd(from, i);
+                if (i === 0 || d.endsWith('-01'))
+                    monthsHtml += `<div class="absolute top-0 text-[10px] font-semibold text-slate-500 pl-1 border-l border-slate-200 whitespace-nowrap" style="left:${i * dw}px">${MONTHS[+d.slice(5, 7) - 1]}</div>`;
+                if (dw >= 12 || new Date(sdParse(d)).getUTCDay() === 1)
+                    daysHtml += `<div class="absolute text-[9px] text-slate-400 text-center" style="left:${i * dw}px;width:${dw >= 12 ? dw : dw * 7}px;text-align:${dw >= 12 ? 'center' : 'left'}">${+d.slice(8)}</div>`;
+                if (!sdIsWork(d, wd)) bgHtml += `<div class="absolute top-0 bottom-0 bg-slate-100/80" style="left:${i * dw}px;width:${dw}px"></div>`;
+            }
+            if (sum.today >= from && sum.today <= to)
+                bgHtml += `<div data-today class="absolute top-0 bottom-0 w-0.5 bg-amber-400" style="left:${x(sum.today) + dw / 2}px" title="Сегодня"></div>`;
+            if (sum.deadline && sum.deadline >= from && sum.deadline <= to)
+                bgHtml += `<div class="absolute top-0 bottom-0 border-l-2 border-dashed border-rose-500" style="left:${x(sum.deadline) + dw}px" title="Срок сдачи"></div>`;
+
+            const sections = [];
+            items.forEach(it => {
+                const k = it.section || 'Без раздела';
+                let s = sections.find(z => z.name === k);
+                if (!s) sections.push(s = { name: k, items: [] });
+                s.items.push(it);
+            });
+            const nameCls = 'sticky left-0 z-20 bg-white border-r border-slate-200 w-[140px] sm:w-[240px] flex-shrink-0';
+            const rows = sections.map(sec => `
+                <div class="flex border-t border-slate-200 bg-slate-50">
+                    <div class="${nameCls} !bg-slate-50 px-2 py-1 text-xs font-bold text-slate-700 truncate">${escapeHtml(sec.name)}</div>
+                    <div style="width:${W}px"></div>
+                </div>
+                ${sec.items.map(it => {
+                    const s = sum.stats[it.id], c = SCHEDULE_COLORS[s.status];
+                    let bar = '';
+                    if (it.start_date && it.end_date) {
+                        const left = x(it.start_date), width = (sdDays(it.start_date, it.end_date) + 1) * dw;
+                        bar = `<div class="absolute top-2 h-4 rounded ${c.soft} overflow-hidden" style="left:${left}px;width:${width}px"><div class="h-full ${c.bar}" style="width:${Math.round(s.pct * 100)}%"></div></div>`;
+                        if (s.forecastEnd && s.forecastEnd > it.end_date && s.status !== 'done')
+                            bar += `<div class="absolute top-2 h-4 rounded-r border-2 border-dashed border-rose-400" style="left:${x(it.end_date) + dw}px;width:${sdDays(it.end_date, s.forecastEnd) * dw}px" title="Прогноз: ${sdShow(s.forecastEnd)}"></div>`;
+                    }
+                    return `<div class="schedule-row flex border-t border-slate-100 hover:bg-brand-50/40 cursor-pointer" data-item="${it.id}" onclick="openScheduleItem('${it.id}')">
+                        <div class="${nameCls} px-2 py-1">
+                            <div class="text-xs font-semibold text-slate-800 truncate" title="${escapeHtml(it.name)}">${escapeHtml(it.name)}</div>
+                            <div class="text-[10px] ${c.text} truncate">${Math.round(s.pct * 100)}% · ${c.label}${s.lagDays > 0 && s.status !== 'done' ? ` · −${fmtQty(s.lagDays)} дн.` : ''}</div>
+                        </div>
+                        <div class="relative h-9" style="width:${W}px">${bar}</div>
+                    </div>`;
+                }).join('')}`).join('');
+            const legend = ['ok', 'late', 'overdue', 'done'].map(k => `<span class="inline-flex items-center gap-1"><span class="w-3 h-2.5 rounded-sm ${SCHEDULE_COLORS[k].bar}"></span>${SCHEDULE_COLORS[k].label}</span>`).join('')
+                + '<span class="inline-flex items-center gap-1"><span class="w-3 h-2.5 rounded-sm border-2 border-dashed border-rose-400"></span>Прогноз</span>'
+                + '<span class="inline-flex items-center gap-1"><span class="w-0.5 h-3 bg-amber-400"></span>Сегодня</span>'
+                + (sum.deadline ? '<span class="inline-flex items-center gap-1"><span class="h-3 border-l-2 border-dashed border-rose-500"></span>Срок сдачи</span>' : '');
+            return `<div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                <div class="px-3 py-2 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200">
+                    <div class="font-bold text-sm text-slate-900">Сроки работ</div>
+                    <div class="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">${legend}</div>
+                </div>
+                <div class="schedule-scroll overflow-x-auto custom-scrollbar">
+                    <div id="scheduleGanttGrid" class="relative" style="width:${W + 240}px;min-width:100%">
+                        <div class="flex sticky top-0 bg-white z-10">
+                            <div class="${nameCls} px-2 py-1 text-[11px] text-slate-400">Работа · % · статус</div>
+                            <div class="relative h-8" style="width:${W}px">${monthsHtml}<div class="absolute left-0 right-0 top-4">${daysHtml}</div></div>
+                        </div>
+                        <div class="relative">
+                            <div class="absolute top-0 bottom-0 pointer-events-none flex" style="left:0;right:0"><div class="w-[140px] sm:w-[240px] flex-shrink-0"></div><div class="relative" style="width:${W}px">${bgHtml}</div></div>
+                            <div class="relative">${rows}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        // Люди по неделям: сколько нужно по графику и сколько есть. Отстающие работы считаем по «нужно, чтобы успеть».
+        function scheduleWeeks(sum) {
+            const { items } = scheduleState;
+            const dated = items.filter(i => i.start_date && i.end_date && sum.stats[i.id].status !== 'done');
+            if (!dated.length) return [];
+            const wd = sum.wd;
+            let start = sdMin(...dated.map(i => i.start_date), sum.today);
+            start = sdAdd(start, -((new Date(sdParse(start)).getUTCDay() + 6) % 7));
+            const end = sdMax(...dated.map(i => sdMax(i.end_date, sum.stats[i.id].forecastEnd)));
+            const weeks = [];
+            for (let w = start; w <= end; w = sdAdd(w, 7)) {
+                const wEnd = sdAdd(w, 6);
+                const wdays = sdWorkdays(w, wEnd, wd) || 1;
+                let people = 0;
+                const machines = {};
+                dated.forEach(it => {
+                    const s = sum.stats[it.id];
+                    // До сегодняшнего дня — план; с сегодня у отстающих — нужное число людей до планового срока.
+                    const crewNow = s.late && !s.overdue && s.neededPeople ? s.neededPeople : Number(it.crew) || 0;
+                    const days = (a, b) => (a <= b ? sdWorkdays(a, b, wd) : 0);
+                    const past = days(sdMax(w, it.start_date), sdMin(wEnd, it.end_date, sdAdd(sum.today, -1)));
+                    const future = days(sdMax(w, it.start_date, sum.today), sdMin(wEnd, s.overdue ? s.forecastEnd : it.end_date));
+                    const used = past * (Number(it.crew) || 0) + future * crewNow;
+                    people += used;
+                    if (it.machine && (past + future) > 0) machines[it.machine] = Math.max(machines[it.machine] || 0, Number(it.machine_count) || 0);
+                });
+                weeks.push({ start: w, end: wEnd, people: Math.round(people / wdays), machines });
+            }
+            return weeks;
+        }
+        function scheduleResourcesHtml(sum) {
+            const weeks = scheduleWeeks(sum);
+            if (!weeks.length) return '';
+            const avail = sum.available;
+            const max = Math.max(avail, ...weeks.map(w => w.people), 1);
+            const H = 120;
+            const cols = weeks.map(w => {
+                const short = avail > 0 && w.people > avail;
+                const isNow = sum.today >= w.start && sum.today <= w.end;
+                const m = Object.entries(w.machines).map(([k, v]) => `${k}: ${v}`).join(', ');
+                return `<div class="schedule-week flex flex-col items-center flex-shrink-0 w-12" data-people="${w.people}" title="${sdShow(w.start)}–${sdShow(w.end)}: нужно ${w.people} чел.${m ? '. Техника: ' + escapeHtml(m) : ''}">
+                    <div class="text-[11px] font-bold ${short ? 'text-rose-600' : 'text-slate-700'}">${w.people}</div>
+                    <div class="relative w-8 bg-slate-50 rounded-t" style="height:${H}px">
+                        <div class="absolute bottom-0 left-0 right-0 rounded-t ${short ? 'bg-rose-400' : 'bg-brand-500'}" style="height:${Math.round(w.people / max * H)}px"></div>
+                    </div>
+                    <div class="text-[10px] ${isNow ? 'font-bold text-amber-600' : 'text-slate-500'}">${sdShow(w.start)}</div>
+                    <div class="text-[10px] text-slate-400 h-3">${Object.values(w.machines).reduce((s, v) => s + v, 0) ? '<i class="fa-solid fa-truck-monster"></i> ' + Object.values(w.machines).reduce((s, v) => s + v, 0) : ''}</div>
+                </div>`;
+            }).join('');
+            const line = avail > 0 ? `<div class="absolute left-0 right-0 border-t-2 border-dashed border-emerald-500 pointer-events-none" style="bottom:${Math.round(avail / max * H) + 28}px"><span class="absolute -top-4 left-1 text-[10px] font-semibold text-emerald-700 bg-white/80 px-1">есть ${avail} чел.</span></div>` : '';
+            return `<div class="bg-white rounded-xl border border-slate-200 p-3">
+                <div class="font-bold text-sm text-slate-900 mb-0.5">Люди и техника по неделям</div>
+                <div class="text-[11px] text-slate-500 mb-2">Столбик — сколько человек нужно в среднем в день недели. Красный — больше, чем есть на объекте${avail ? '' : ' (укажите в «Сроки и люди»)'}. Внизу — единиц техники.</div>
+                <div class="overflow-x-auto custom-scrollbar"><div class="relative flex gap-1 min-w-max pt-4">${line}${cols}</div></div>
+            </div>`;
+        }
+
+        function showScheduleModal(title, html) {
+            document.getElementById('scheduleModalTitle').textContent = title;
+            document.getElementById('scheduleModalBody').innerHTML = html;
+            openModal('scheduleModal');
+        }
+        const schInput = 'w-full bg-white border border-slate-300 rounded-lg text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-slate-50 disabled:text-slate-500';
+        const schLabel = 'block text-xs font-bold text-slate-600 mb-1';
+        const schBtn = 'bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors';
+
+        // ---- Сроки и люди ----
+        function openScheduleSettings() {
+            const s = scheduleState.settings || {};
+            showScheduleModal('Сроки и люди', `
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                    <div><label class="${schLabel}">Начало работ</label><input id="schSetStart" type="date" class="${schInput}" value="${s.start_date || ''}"></div>
+                    <div><label class="${schLabel}">Срок сдачи объекта</label><input id="schSetDeadline" type="date" class="${schInput}" value="${s.deadline || ''}"></div>
+                    <div><label class="${schLabel}">Сколько людей есть на объекте</label><input id="schSetPeople" type="number" min="0" class="${schInput}" value="${s.people_available ?? ''}" placeholder="напр. 12"></div>
+                    <div><label class="${schLabel}">Рабочая неделя</label><select id="schSetWd" class="${schInput}">
+                        ${[5, 6, 7].map(n => `<option value="${n}" ${Number(s.workdays || 6) === n ? 'selected' : ''}>${n} дней${n === 5 ? ' (пн–пт)' : n === 6 ? ' (пн–сб)' : ' (без выходных)'}</option>`).join('')}
+                    </select></div>
+                </div>
+                <p class="text-xs text-slate-500 mt-3">По этим данным программа считает прогноз и сравнивает, хватает ли людей.</p>
+                <div class="flex justify-end mt-4"><button id="schSetSave" onclick="saveScheduleSettings()" class="${schBtn}">Сохранить</button></div>`);
+        }
+        async function saveScheduleSettings(extra) {
+            const v = id => document.getElementById(id)?.value;
+            const row = extra || {
+                start_date: v('schSetStart') || null, deadline: v('schSetDeadline') || null,
+                people_available: v('schSetPeople') === '' ? null : Number(v('schSetPeople')),
+                workdays: Number(v('schSetWd')) || 6,
+            };
+            row.project_id = scheduleState.projectId;
+            row.updated_at = new Date().toISOString();
+            const { error } = await sb.from('schedule_settings').upsert(row, { onConflict: 'project_id' });
+            if (error) { alert('Не удалось сохранить: ' + error.message); return false; }
+            if (!extra) closeModal('scheduleModal');
+            await renderSchedule();
+            return true;
+        }
+
+        // ---- Составить график из проектных объёмов ----
+        let scheduleGenDraft = [];
+        async function openScheduleGenerate() {
+            const projectId = scheduleState.projectId;
+            const { data, error } = await sb.from('materials').select('*').eq('project_id', projectId).order('name');
+            if (error) { alert('Не удалось загрузить объёмы: ' + error.message); return; }
+            const materials = (data || []).filter(m => Number(m.design_qty) > 0);
+            if (!materials.length) { showScheduleModal('График из объёмов', '<p class="text-sm text-slate-600">В «Объёмах» этого объекта пока нет материалов с количеством. Сначала заполните объёмы (например, кнопкой «Из чертежей»).</p>'); return; }
+            scheduleGenDraft = materials;
+            const s = scheduleState.settings || {};
+            showScheduleModal('График из объёмов', `
+                <p class="text-sm text-slate-600 mb-3">Программа возьмёт каждый материал из «Объёмов», подберёт вид работ, норму выработки, бригаду и технику и расставит работы по порядку: основание, бортовой камень, покрытия, посадки, газон, мульча. Разделы идут параллельно. Всё потом можно поправить.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm mb-2">
+                    <div><label class="${schLabel}">Начало работ</label><input id="schGenStart" type="date" class="${schInput}" value="${s.start_date || scheduleToday()}" onchange="renderScheduleGenPreview()"></div>
+                    <div><label class="${schLabel}">Срок сдачи (необязательно)</label><input id="schGenDeadline" type="date" class="${schInput}" value="${s.deadline || ''}" onchange="renderScheduleGenPreview()"></div>
+                </div>
+                <label class="flex items-center gap-2 text-sm text-slate-700 mb-3"><input id="schGenFit" type="checkbox" class="w-4 h-4" onchange="renderScheduleGenPreview()"> Подобрать людей так, чтобы успеть к сроку сдачи</label>
+                <div id="schGenPreview"></div>
+                <div class="flex justify-end mt-4"><button id="schGenSave" onclick="saveScheduleGenerate()" class="${schBtn}">Создать график</button></div>`);
+            renderScheduleGenPreview();
+        }
+        function scheduleBuildPlan(materials, start, deadline, fit, wd) {
+            const rows = materials.map(m => {
+                const n = scheduleNormFor(m);
+                return { material: m, section: m.section || 'Без раздела', phase: n.phase, name: `${n.work}: ${m.name}`, unit: m.unit || '', qty: Number(m.design_qty), norm: n.norm, crew: n.crew, machine: n.machine, machine_count: n.machine_count };
+            });
+            const place = factor => {
+                const bySec = {};
+                rows.forEach(r => { (bySec[r.section] = bySec[r.section] || []).push(r); });
+                Object.values(bySec).forEach(list => {
+                    let phaseStart = sdNextWork(start, wd);
+                    [...new Set(list.map(r => r.phase))].sort((a, b) => a - b).forEach(ph => {
+                        let phaseEnd = phaseStart;
+                        list.filter(r => r.phase === ph).forEach(r => {
+                            r.crewUsed = Math.max(1, Math.ceil(r.crew * factor - 1e-9));
+                            r.days = Math.max(1, Math.ceil(r.qty / (r.norm * r.crewUsed) - 1e-9));
+                            r.start_date = phaseStart;
+                            r.end_date = sdAddWorkdays(phaseStart, r.days, wd);
+                            phaseEnd = sdMax(phaseEnd, r.end_date);
+                        });
+                        phaseStart = sdNextWork(sdAdd(phaseEnd, 1), wd);
+                    });
+                });
+                return sdMax(...rows.map(r => r.end_date));
+            };
+            let factor = 1, end = place(1);
+            if (fit && deadline && end > deadline) {
+                const avail = Math.max(1, sdWorkdays(sdNextWork(start, wd), deadline, wd));
+                factor = sdWorkdays(sdNextWork(start, wd), end, wd) / avail;
+                for (let i = 0; i < 20 && (end = place(factor)) > deadline; i++) factor *= 1.15;
+            }
+            rows.forEach(r => { r.crew = r.crewUsed; });
+            return { rows, end };
+        }
+        function renderScheduleGenPreview() {
+            const start = document.getElementById('schGenStart').value || scheduleToday();
+            const deadline = document.getElementById('schGenDeadline').value || null;
+            const fit = document.getElementById('schGenFit').checked;
+            const plan = scheduleBuildPlan(scheduleGenDraft, start, deadline, fit, scheduleWd());
+            const existing = new Set(scheduleState.items.map(i => i.material_id).filter(Boolean));
+            const peak = scheduleBuildPeak(plan.rows);
+            const lateTxt = deadline && plan.end > deadline ? `<span class="text-rose-600 font-semibold">позже срока на ${sdDays(deadline, plan.end)} дн.</span>${fit ? ' Людьми быстрее не ускорить: работы идут друг за другом и каждая занимает хотя бы день. Сдвиньте начало или срок.' : ''}` : deadline ? '<span class="text-emerald-600 font-semibold">успеваем к сроку</span>' : '';
+            document.getElementById('schGenPreview').innerHTML = `
+                <div class="text-sm mb-2">Окончание по плану: <b id="schGenEnd">${formatDateDisplay(plan.end)}</b> ${lateTxt}. В пиковый день нужно <b id="schGenPeak">${peak}</b> чел.</div>
+                <div class="overflow-x-auto border border-slate-200 rounded-lg"><table class="w-full text-xs">
+                    <thead class="bg-slate-50 text-slate-500"><tr><th class="text-left px-2 py-1.5">Работа</th><th class="text-right px-2">Объём</th><th class="text-right px-2" title="выработка 1 человека в смену">Норма</th><th class="text-right px-2">Людей</th><th class="text-right px-2">Дней</th><th class="text-left px-2">Сроки</th><th class="text-left px-2">Техника</th></tr></thead>
+                    <tbody>${plan.rows.map(r => `<tr class="border-t border-slate-100">
+                        <td class="px-2 py-1"><div class="font-semibold text-slate-800">${escapeHtml(r.name)}</div><div class="text-[10px] text-slate-400">${escapeHtml(r.section)}${existing.has(r.material.id) ? ' · уже в графике, обновится объём' : ''}</div></td>
+                        <td class="px-2 text-right whitespace-nowrap">${fmtQty(r.qty)} ${escapeHtml(r.unit)}</td>
+                        <td class="px-2 text-right">${fmtQty(r.norm)}</td><td class="px-2 text-right">${r.crew}</td><td class="px-2 text-right">${r.days}</td>
+                        <td class="px-2 whitespace-nowrap">${sdShow(r.start_date)}–${sdShow(r.end_date)}</td>
+                        <td class="px-2 whitespace-nowrap">${r.machine ? escapeHtml(r.machine) + ' × ' + r.machine_count : '—'}</td></tr>`).join('')}</tbody>
+                </table></div>`;
+            return plan;
+        }
+        function scheduleBuildPeak(rows) {
+            const daily = {};
+            rows.forEach(r => { for (let d = r.start_date; d <= r.end_date; d = sdAdd(d, 1)) daily[d] = (daily[d] || 0) + r.crew; });
+            return Math.max(0, ...Object.values(daily));
+        }
+        async function saveScheduleGenerate() {
+            const plan = renderScheduleGenPreview();
+            const start = document.getElementById('schGenStart').value || scheduleToday();
+            const deadline = document.getElementById('schGenDeadline').value || null;
+            const btn = document.getElementById('schGenSave');
+            btn.disabled = true;
+            const byMaterial = {};
+            scheduleState.items.forEach(i => { if (i.material_id) byMaterial[i.material_id] = i; });
+            let order = scheduleState.items.reduce((m, i) => Math.max(m, i.sort_order || 0), 0);
+            const inserts = [];
+            for (const r of plan.rows) {
+                const ex = byMaterial[r.material.id];
+                if (ex) {
+                    if (Number(ex.qty) !== r.qty) {
+                        const { error } = await sb.from('schedule_items').update({ qty: r.qty, updated_at: new Date().toISOString() }).eq('id', ex.id);
+                        if (error) { alert('Не удалось сохранить: ' + error.message); btn.disabled = false; return; }
+                    }
+                } else {
+                    inserts.push({ project_id: scheduleState.projectId, sort_order: ++order, section: r.section, name: r.name, material_id: r.material.id, unit: r.unit, qty: r.qty, norm: r.norm, crew: r.crew, machine: r.machine || null, machine_count: r.machine_count || null, start_date: r.start_date, end_date: r.end_date });
+                }
+            }
+            if (inserts.length) {
+                const { error } = await sb.from('schedule_items').insert(inserts);
+                if (error) { alert('Не удалось сохранить: ' + error.message); btn.disabled = false; return; }
+            }
+            const s = scheduleState.settings || {};
+            if (!s.start_date || (deadline && deadline !== s.deadline))
+                await saveScheduleSettings({ start_date: s.start_date || start, deadline: deadline || s.deadline || null, people_available: s.people_available ?? null, workdays: s.workdays || 6 });
+            closeModal('scheduleModal');
+            await renderSchedule();
+        }
+
+        // ---- Одна работа: план, статистика и история факта ----
+        function openScheduleItem(id) {
+            const it = id ? scheduleState.items.find(i => i.id === id) : null;
+            if (!it && !canPlanSchedule()) return;
+            const dis = canPlanSchedule() ? '' : 'disabled';
+            const v = k => escapeHtml(it?.[k] ?? '');
+            const sections = [...new Set(scheduleState.items.map(i => i.section).filter(Boolean))];
+            let statsHtml = '', histHtml = '';
+            if (it) {
+                const s = scheduleItemStats(it, scheduleState.progress, scheduleToday(), scheduleWd());
+                const c = SCHEDULE_COLORS[s.status];
+                const advice = (s.late || s.overdue) ? `<div class="mt-2 text-xs text-slate-700 bg-amber-50 border border-amber-200 rounded-lg p-2">${scheduleAdviceText(it, s)}</div>` : '';
+                statsHtml = `<div class="bg-slate-50 rounded-lg p-3 mb-4 text-sm">
+                    <div class="flex flex-wrap gap-x-5 gap-y-1">
+                        <div><span class="text-slate-500">Сделано:</span> <b id="schItemDone">${fmtQty(s.done)}</b> из ${fmtQty(it.qty)} ${escapeHtml(it.unit || '')} (${Math.round(s.pct * 100)}%)</div>
+                        <div><span class="text-slate-500">Статус:</span> <b class="${c.text}">${c.label}</b></div>
+                        <div><span class="text-slate-500">Прогноз окончания:</span> <b>${sdShow(s.forecastEnd)}</b></div>
+                        ${s.lag > 0 && s.status !== 'done' ? `<div><span class="text-slate-500">Отставание:</span> <b class="text-rose-600">${fmtQty(roundQty(s.lag, it.unit))} ${escapeHtml(it.unit || '')}, ${fmtQty(s.lagDays)} дн.</b></div>` : ''}
+                        <div><span class="text-slate-500">Темп:</span> ${fmtQty(Math.round(s.pace * 10) / 10)} ${escapeHtml(it.unit || '')}/день</div>
+                    </div>${advice}
+                </div>`;
+                const facts = scheduleState.progress.filter(p => p.item_id === it.id).sort((a, b) => b.work_date.localeCompare(a.work_date));
+                histHtml = `<div class="mt-5"><div class="font-bold text-sm text-slate-900 mb-2">Выполнение по дням</div>
+                    ${facts.length ? `<div class="border border-slate-200 rounded-lg divide-y divide-slate-100">${facts.map(p => `
+                        <div class="flex items-center gap-3 px-3 py-1.5 text-sm">
+                            <div class="w-20 text-slate-500">${formatDateDisplay(p.work_date)}</div>
+                            <div class="flex-1"><b>${fmtQty(p.qty)}</b> ${escapeHtml(it.unit || '')}${p.people ? ` · ${p.people} чел.` : ''}${p.machines ? ` · техника ${p.machines}` : ''}${p.note ? ` · <span class="text-slate-500">${escapeHtml(p.note)}</span>` : ''}</div>
+                            ${canPlanSchedule() || (p.created_by && p.created_by === currentUserProfile?.id) ? `<button onclick="deleteScheduleFact('${p.id}', '${it.id}')" class="text-slate-400 hover:text-rose-600" title="Удалить запись"><i class="fa-solid fa-trash-can"></i></button>` : ''}
+                        </div>`).join('')}</div>` : '<div class="text-xs text-slate-400">Пока нет записей. Их вносят кнопкой «Внести выполнение».</div>'}
+                </div>`;
+            }
+            showScheduleModal(it ? it.name : 'Новая работа', `${statsHtml}
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                    <div class="col-span-2"><label class="${schLabel}">Вид работ</label><input id="schItemName" ${dis} class="${schInput}" value="${v('name')}" placeholder="напр. Посадка кустарников"></div>
+                    <div class="col-span-2"><label class="${schLabel}">Раздел</label><input id="schItemSection" ${dis} list="schSectionList" class="${schInput}" value="${v('section')}" placeholder="напр. Озеленение"><datalist id="schSectionList">${sections.map(s => `<option value="${escapeHtml(s)}">`).join('')}</datalist></div>
+                    <div><label class="${schLabel}">Объём</label><input id="schItemQty" ${dis} type="number" min="0" step="any" class="${schInput}" value="${v('qty')}" oninput="scheduleItemAutoEnd()"></div>
+                    <div><label class="${schLabel}">Ед.</label><input id="schItemUnit" ${dis} class="${schInput}" value="${v('unit')}" placeholder="шт, м²"></div>
+                    <div><label class="${schLabel}" title="Сколько делает 1 человек за смену">Норма на 1 чел.</label><input id="schItemNorm" ${dis} type="number" min="0" step="any" class="${schInput}" value="${v('norm')}" oninput="scheduleItemAutoEnd()"></div>
+                    <div><label class="${schLabel}">Людей</label><input id="schItemCrew" ${dis} type="number" min="0" class="${schInput}" value="${v('crew')}" oninput="scheduleItemAutoEnd()"></div>
+                    <div class="col-span-2"><label class="${schLabel}">Техника</label><input id="schItemMachine" ${dis} class="${schInput}" value="${v('machine')}" placeholder="напр. Мини-погрузчик"></div>
+                    <div class="col-span-2"><label class="${schLabel}">Техники, ед.</label><input id="schItemMachineCount" ${dis} type="number" min="0" class="${schInput}" value="${v('machine_count')}"></div>
+                    <div class="col-span-2"><label class="${schLabel}">Начало</label><input id="schItemStart" ${dis} type="date" class="${schInput}" value="${v('start_date')}" onchange="scheduleItemAutoEnd()"></div>
+                    <div class="col-span-2"><label class="${schLabel}">Окончание</label><input id="schItemEnd" ${dis} type="date" class="${schInput}" value="${v('end_date')}"><div id="schItemEndHint" class="text-[11px] text-slate-400 mt-0.5"></div></div>
+                </div>
+                ${canPlanSchedule() ? `<div class="flex justify-between gap-2 mt-4">
+                    ${it ? `<button onclick="deleteScheduleItem('${it.id}')" class="text-rose-600 hover:text-rose-700 text-sm font-semibold"><i class="fa-solid fa-trash-can mr-1"></i> Удалить работу</button>` : '<span></span>'}
+                    <button id="schItemSave" onclick="saveScheduleItem(${it ? `'${it.id}'` : ''})" class="${schBtn}">Сохранить</button>
+                </div>` : ''}
+                ${histHtml}`);
+        }
+        // Окончание пересчитывается само при изменении объёма, нормы, людей или начала.
+        function scheduleItemAutoEnd() {
+            const n = id => Number(document.getElementById(id).value) || 0;
+            const start = document.getElementById('schItemStart').value;
+            const qty = n('schItemQty'), norm = n('schItemNorm'), crew = n('schItemCrew');
+            const hint = document.getElementById('schItemEndHint');
+            if (!start || !qty || !norm || !crew) { hint.textContent = ''; return; }
+            const days = Math.max(1, Math.ceil(qty / (norm * crew) - 1e-9));
+            document.getElementById('schItemEnd').value = sdAddWorkdays(start, days, scheduleWd());
+            hint.textContent = `${days} раб. дн. при ${crew} чел.`;
+        }
+        async function saveScheduleItem(id) {
+            const g = k => document.getElementById(k).value.trim();
+            const num = k => g(k) === '' ? null : Number(g(k));
+            const row = {
+                name: g('schItemName'), section: g('schItemSection') || null, unit: g('schItemUnit') || null,
+                qty: num('schItemQty') || 0, norm: num('schItemNorm'), crew: num('schItemCrew'),
+                machine: g('schItemMachine') || null, machine_count: num('schItemMachineCount'),
+                start_date: g('schItemStart') || null, end_date: g('schItemEnd') || null, updated_at: new Date().toISOString(),
+            };
+            if (!row.name) { alert('Укажите вид работ.'); return; }
+            if (row.start_date && row.end_date && row.end_date < row.start_date) { alert('Окончание раньше начала.'); return; }
+            let error;
+            if (id) ({ error } = await sb.from('schedule_items').update(row).eq('id', id));
+            else {
+                row.project_id = scheduleState.projectId;
+                row.sort_order = scheduleState.items.reduce((m, i) => Math.max(m, i.sort_order || 0), 0) + 1;
+                ({ error } = await sb.from('schedule_items').insert(row));
+            }
+            if (error) { alert('Не удалось сохранить: ' + error.message); return; }
+            closeModal('scheduleModal');
+            await renderSchedule();
+        }
+        async function deleteScheduleItem(id) {
+            if (!confirm('Удалить эту работу из графика вместе с её выполнением?')) return;
+            const { error } = await sb.from('schedule_items').delete().eq('id', id);
+            if (error) { alert('Не удалось удалить: ' + error.message); return; }
+            scheduleState.progress = scheduleState.progress.filter(p => p.item_id !== id);
+            closeModal('scheduleModal');
+            await renderSchedule();
+        }
+        async function deleteScheduleFact(factId, itemId) {
+            if (!confirm('Удалить эту запись о выполнении?')) return;
+            const { error } = await sb.from('schedule_progress').delete().eq('id', factId);
+            if (error) { alert('Не удалось удалить: ' + error.message); return; }
+            await renderSchedule();
+            openScheduleItem(itemId);
+        }
+
+        // ---- Ежедневное выполнение: за день по каждой работе сколько сделали и сколько людей было ----
+        function openScheduleFactForm() {
+            const today = scheduleToday(), wd = scheduleWd();
+            const open = scheduleState.items
+                .map(it => ({ it, s: scheduleItemStats(it, scheduleState.progress, today, wd) }))
+                .filter(x => x.s.status !== 'done')
+                .sort((a, b) => String(a.it.start_date).localeCompare(String(b.it.start_date)));
+            if (!open.length) { showScheduleModal('Внести выполнение', '<p class="text-sm text-slate-600">Все работы выполнены, вносить нечего.</p>'); return; }
+            // Сначала те, что идут сейчас; будущие — ниже.
+            const now = open.filter(x => !x.it.start_date || x.it.start_date <= today);
+            const later = open.filter(x => x.it.start_date && x.it.start_date > today);
+            const row = ({ it, s }) => `<div class="schedule-fact-row grid grid-cols-[1fr_auto_auto] gap-2 items-center py-2 border-t border-slate-100" data-item="${it.id}">
+                    <div class="min-w-0"><div class="text-sm font-semibold text-slate-800 truncate">${escapeHtml(it.name)}</div><div class="text-[11px] text-slate-500">осталось ${fmtQty(s.remaining)} ${escapeHtml(it.unit || '')} · план ${fmtQty(Math.round(scheduleItemPerDay(it, wd) * 10) / 10)}/день</div></div>
+                    <input type="number" min="0" step="any" class="sch-fact-qty w-20 sm:w-24 bg-white border border-slate-300 rounded-lg text-sm px-2 py-1.5" placeholder="${escapeHtml(it.unit || 'кол-во')}">
+                    <input type="number" min="0" class="sch-fact-people w-16 bg-white border border-slate-300 rounded-lg text-sm px-2 py-1.5" placeholder="чел.">
+                </div>`;
+            showScheduleModal('Внести выполнение', `
+                <div class="flex flex-wrap items-end gap-3 mb-2">
+                    <div><label class="${schLabel}">За какой день</label><input id="schFactDate" type="date" class="${schInput}" value="${today}"></div>
+                    <p class="text-xs text-slate-500 flex-1 min-w-[200px]">Впишите, сколько сделали за день и сколько людей работало. Пустые строки не сохраняются.</p>
+                </div>
+                <div class="text-[11px] text-slate-400 grid grid-cols-[1fr_auto_auto] gap-2"><span>Работа</span><span class="w-20 sm:w-24">Сделано</span><span class="w-16">Людей</span></div>
+                ${now.map(row).join('')}
+                ${later.length ? `<details class="mt-2"><summary class="text-xs text-brand-600 font-semibold cursor-pointer py-1">Работы, которые по плану начнутся позже (${later.length})</summary>${later.map(row).join('')}</details>` : ''}
+                <div class="flex justify-end mt-4"><button id="schFactSave" onclick="saveScheduleFacts()" class="${schBtn}">Сохранить</button></div>`);
+        }
+        async function saveScheduleFacts() {
+            const date = document.getElementById('schFactDate').value;
+            if (!date) { alert('Укажите дату.'); return; }
+            const rows = [];
+            document.querySelectorAll('#scheduleModalBody .schedule-fact-row').forEach(el => {
+                const qty = Number(el.querySelector('.sch-fact-qty').value) || 0;
+                const people = el.querySelector('.sch-fact-people').value;
+                if (qty > 0 || people !== '') rows.push({ item_id: el.dataset.item, project_id: scheduleState.projectId, work_date: date, qty, people: people === '' ? null : Number(people) });
+            });
+            if (!rows.length) { alert('Ничего не заполнено.'); return; }
+            const { error } = await sb.from('schedule_progress').insert(rows);
+            if (error) { alert('Не удалось сохранить: ' + error.message); return; }
+            closeModal('scheduleModal');
+            await renderSchedule();
+        }
+
+        async function exportScheduleExcel() {
+            if (!scheduleState.items.length) { alert('График пуст.'); return; }
+            try { await loadXlsxLib(); } catch (e) { alert(e.message); return; }
+            const sum = scheduleSummary();
+            const proj = appData.projects.find(p => p.id === scheduleState.projectId);
+            const d = s => s ? formatDateDisplay(s) : '';
+            const aoa = [[`План-график: ${proj?.name || ''}`], [`На ${d(sum.today)}. Выполнено ${Math.round(sum.pct * 100)}%. Срок сдачи ${d(sum.deadline) || '—'}, прогноз ${d(sum.forecastEnd)}.`], [],
+                ['Раздел', 'Работа', 'Ед.', 'Объём', 'Сделано', '%', 'Норма на 1 чел.', 'Людей', 'Техника', 'Ед. техники', 'Начало', 'Окончание', 'Прогноз', 'Статус', 'Отставание, дн.', 'Нужно людей, чтобы успеть'],
+                ...scheduleState.items.map(it => {
+                    const s = sum.stats[it.id];
+                    return [it.section || '', it.name, it.unit || '', Number(it.qty), roundQty(s.done), Math.round(s.pct * 100), it.norm ?? '', it.crew ?? '', it.machine || '', it.machine_count ?? '',
+                        d(it.start_date), d(it.end_date), d(s.forecastEnd), SCHEDULE_COLORS[s.status].label, s.status === 'done' ? '' : s.lagDays || '', s.extraPeople ? s.neededPeople : ''];
+                })];
+            const ws = XLSX.utils.aoa_to_sheet(aoa);
+            ws['!cols'] = [{ wch: 16 }, { wch: 44 }, { wch: 6 }, { wch: 9 }, { wch: 9 }, { wch: 5 }, { wch: 8 }, { wch: 7 }, { wch: 18 }, { wch: 7 }, { wch: 11 }, { wch: 11 }, { wch: 11 }, { wch: 12 }, { wch: 9 }, { wch: 12 }];
+            const names = Object.fromEntries(scheduleState.items.map(i => [i.id, i.name]));
+            const ws2 = XLSX.utils.aoa_to_sheet([['Дата', 'Работа', 'Сделано', 'Людей', 'Примечание'],
+                ...[...scheduleState.progress].sort((a, b) => a.work_date.localeCompare(b.work_date)).map(p => [d(p.work_date), names[p.item_id] || '', Number(p.qty), p.people ?? '', p.note || ''])]);
+            ws2['!cols'] = [{ wch: 11 }, { wch: 44 }, { wch: 9 }, { wch: 7 }, { wch: 30 }];
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'План-график');
+            XLSX.utils.book_append_sheet(wb, ws2, 'Выполнение');
+            XLSX.writeFile(wb, `План-график - ${(proj?.name || '').replace(/[\\/:*?"<>|]/g, ' ')}.xlsx`);
+        }
+
         const helpBtnRow = (icon, name, text, who) => `
             <div class="flex gap-3">
                 <div class="w-8 h-8 flex-shrink-0 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center"><i class="fa-solid ${icon}"></i></div>
@@ -7206,6 +8008,34 @@
                         <li>Выбранное и нарисованное сохраняется и видно на телефоне и компьютере под вашей учётной записью.</li>
                         <li>Эти подсчёты не меняют проектные объёмы в списке, это отдельный расчёт.</li>
                     </ul>`,
+            },
+            schedule: {
+                title: 'Как работает «План-график»',
+                html: () => `
+                    <p>План-график показывает по каждому виду работ: когда делать, сколько уже сделано, успеваем ли и сколько нужно людей и техники, чтобы успеть.</p>
+                    ${helpH('Что на экране')}
+                    <ul class="space-y-1 pl-1">
+                        <li><b>Карточки сверху</b> — общий процент выполнения, срок сдачи, прогноз окончания и сколько людей нужно сегодня (и сколько есть).</li>
+                        <li><b>«Что требует внимания»</b> — отстающие работы и что сделать: сколько добавить людей и техники, чтобы успеть.</li>
+                        <li><b>Сроки работ</b> — полоса показывает план, заливка — сколько сделано. Синяя — по графику, жёлтая — отстаёт, красная — срок прошёл, зелёная — готово. Штрих после полосы — прогноз, когда закончим при нынешнем темпе. Жёлтая линия — сегодня, красная пунктирная — срок сдачи. Нажмите на строку, чтобы открыть работу.</li>
+                        <li><b>Люди и техника по неделям</b> — сколько человек нужно в каждую неделю. Красный столбик — людей не хватает. Зелёная линия — сколько есть.</li>
+                    </ul>
+                    ${helpH('Кнопки')}
+                    <div class="space-y-3">
+                        ${helpBtnRow('fa-clipboard-check', 'Внести выполнение', 'В конце дня впишите по каждой работе, сколько сделали и сколько людей работало. Из этого считаются процент, отставание и прогноз.', 'руководитель, руководство, прораб, ПТО')}
+                        ${helpBtnRow('fa-wand-magic-sparkles', 'Из объёмов', 'Составляет график сам по проектным объёмам: подбирает вид работ, норму выработки, бригаду и технику и расставляет по порядку. Можно попросить подобрать людей под срок сдачи. Повторное нажатие добавит новые материалы и обновит объёмы, не создавая дублей.', 'руководитель, руководство')}
+                        ${helpBtnRow('fa-plus', 'Работа', 'Добавить вид работ вручную. Окончание считается само из объёма, нормы и числа людей.', 'руководитель, руководство')}
+                        ${helpBtnRow('fa-sliders', 'Сроки и люди', 'Начало работ, срок сдачи, сколько людей есть на объекте и рабочая неделя (5, 6 или 7 дней).', 'руководитель, руководство')}
+                        ${helpBtnRow('fa-file-excel', 'Excel', 'Скачать график и всё выполнение по дням таблицей.', '')}
+                    </div>
+                    ${helpH('Как считается')}
+                    <ul class="space-y-1 pl-1">
+                        <li><b>Норма</b> — сколько делает 1 человек за смену. Её можно поправить у каждой работы под вашу бригаду.</li>
+                        <li><b>Отставание</b> — насколько сделано меньше, чем должно было быть к сегодняшнему утру, в днях работы.</li>
+                        <li><b>Прогноз</b> — по среднему темпу за последние 7 дней с отчётами. Пока отчётов нет — по плану.</li>
+                        <li><b>Нужно людей</b> — сколько человек должно работать каждый день до планового срока, чтобы успеть. Техника добавляется в той же пропорции.</li>
+                    </ul>
+                    <p class="text-xs text-slate-400">Некоторые кнопки видны не всем: это зависит от роли в системе.</p>`,
             },
         };
         function showHelp(topic) {
@@ -7928,7 +8758,7 @@
 
         async function showPtoScreen() {
             document.getElementById('drawingsScreen').classList.add('hidden');
-            document.getElementById('volumesScreen').classList.add('hidden');
+            document.getElementById('volumesScreen').classList.add('hidden'); document.getElementById('scheduleScreen').classList.add('hidden');
             document.getElementById('boardsScreen').classList.add('hidden');
             document.getElementById('projectView').classList.add('hidden');
             document.getElementById('accountingScreen').classList.add('hidden');

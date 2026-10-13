@@ -1,11 +1,11 @@
 // Подменная база для автотестов: вместо настоящего Supabase приложение работает с таблицами в памяти браузера.
 // Настоящие данные и ключи в тестах не участвуют.
 (function () {
-    window.__db = { projects: [], drawings: [], materials: [], material_deliveries: [], material_aliases: [], material_design_log: [], plan_zones: [] };
+    window.__db = { projects: [], drawings: [], materials: [], material_deliveries: [], material_aliases: [], material_design_log: [], plan_zones: [], schedule_settings: [], schedule_items: [], schedule_progress: [] };
     window.__files = {};
     window.__rpc = { can_manage_drawings: false };
     const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(16).slice(2));
-    const keysOf = { material_aliases: ['project_id', 'alias'], plan_zones: ['project_id', 'sheet'] };
+    const keysOf = { material_aliases: ['project_id', 'alias'], plan_zones: ['project_id', 'sheet'], schedule_settings: ['project_id'] };
 
     function query(table) {
         const st = { filters: [], op: 'select', payload: null, opts: {} };
