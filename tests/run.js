@@ -294,6 +294,38 @@ test('По зонам: участок без выноски найден, под
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
+test('По зонам: лист покрытий — участки лежат друг на друге, каждый выбирается со своей площадью', async () => {
+    // Как на плане покрытий: большая плитка (20 м²) и вставка другого цвета (2 м²) внутри неё; остриё выноски
+    // вставки попадает в обе фигуры. Лист прямо связывает фигуру с её выноской (data-c → data-h).
+    const rect = (x, y, w, h) => `M${x} ${y}l${w} 0 0 ${h} ${-w} 0z`;
+    const plan = [
+        `<g class="it ld" data-s="lbl" data-h="B1" data-p="5" data-q="2 м²"><rect class="hb" x="2" y="40" width="3" height="2"/><path class="ln" stroke="#000" d="M3 41l6 10"/></g>`,
+        `<g class="it ld" data-s="lbl" data-h="A1" data-p="5" data-q="20 м²"><rect class="hb" x="20" y="40" width="3" height="2"/><path class="ln" stroke="#000" d="M21 41l-7 10"/></g>`,
+        `<g class="it" data-s="cov" data-l="Test" data-p="5" data-src="tip" data-c="A1"><path fill="#ffffca" d="${rect(6, 50, 10, 2)}"/></g>`,
+        `<g class="it" data-s="cov" data-l="Test" data-p="5" data-src="tip" data-c="B1"><path fill="#c4a5e5" d="${rect(8, 50.5, 2, 1)}"/></g>`,
+    ].join('');
+    const planz = require('zlib').gzipSync(Buffer.from(plan)).toString('base64');
+    const html = `<!doctype html><svg id="plan" viewBox="0 30 30 30"><g id="root"></g></svg><script>
+const S=[["Покрытия",[["5","Покрытие тестовое","м²","22"]]]];
+const TIPS={"5":[[9,51],[14,51]]};
+const PLANZ="${planz}";</script>`;
+    const page = await openApp();
+    await page.evaluate(h => { __files['p1/test-sheet.html'] = h; }, html);
+    await openZones(page);
+    const st = await page.evaluate(() => [...zonesState.parcels.values()].map(p => ({ q: p.qty, els: p.els.length })).sort((a, b) => a.q - b.q));
+    expect(JSON.stringify(st) === JSON.stringify([{ q: 2, els: 1 }, { q: 20, els: 1 }]), 'у каждой выноски своя фигура: ' + JSON.stringify(st));
+    const [bx, by] = await planToScreen(page, 9, 51);
+    await page.mouse.click(bx, by);
+    let rows = await page.evaluate(() => zonesPickedRows());
+    expect(rows.length === 1 && rows[0].qty === 2, 'нажатие на вставку — 2 м²: ' + JSON.stringify(rows));
+    await page.mouse.click(bx, by);
+    const [ax, ay] = await planToScreen(page, 14, 51);
+    await page.mouse.click(ax, ay);
+    rows = await page.evaluate(() => zonesPickedRows());
+    expect(rows.length === 1 && rows[0].qty === 20, 'нажатие на плитку вокруг — 20 м²: ' + JSON.stringify(rows));
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
 test('По зонам работает на телефоне', async () => {
     const page = await openApp({ width: 390, height: 800 });
     await openZones(page);

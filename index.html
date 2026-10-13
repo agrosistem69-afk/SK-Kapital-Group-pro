@@ -7056,7 +7056,10 @@
             const items = [...root.querySelectorAll('g.it[data-p]:not(.ld)')].filter(g => byPos[g.dataset.p]).map(g => ({ g, pos: g.dataset.p, b: g.getBBox() }));
             const tipItems = new Map();
             items.forEach(it => {
-                const hit = byPos[it.pos].find(pr => inBox(it.b, pr.pt[0], pr.pt[1], 0.05) && contains(it.g, pr.pt[0], pr.pt[1]));
+                // Лист может прямо указать выноску участка (data-c = data-h выноски): так надёжнее, когда остриё
+                // соседней выноски тоже попадает в эту фигуру (участки покрытий лежат друг на друге).
+                const linked = it.g.dataset.c && byPos[it.pos].find(pr => pr.labels.some(l => l.dataset.h === it.g.dataset.c));
+                const hit = linked || byPos[it.pos].find(pr => inBox(it.b, pr.pt[0], pr.pt[1], 0.05) && contains(it.g, pr.pt[0], pr.pt[1]));
                 if (hit) { it.parcel = hit; if (!tipItems.has(hit)) tipItems.set(hit, []); tipItems.get(hit).push(it); }
             });
             items.forEach(it => {
