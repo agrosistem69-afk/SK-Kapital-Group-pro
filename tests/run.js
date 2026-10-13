@@ -269,6 +269,13 @@ test('По зонам: участок без выноски найден, под
     expect(o[0].pos === '3' && near(o[0].area, 50, 1.5) && near(o[0].qty, 50, 1.5), 'участок 10×5 м: ожидался газон (поз. 3), 50 м², получено ' + JSON.stringify(o[0]));
     expect((await page.$eval('#zonesOrphans', e => e.innerText)).includes('Участки без выноски: 1'), 'нет списка участков без выноски');
     expect(await page.$$eval('#zonesPlan g.zorphan', g => g.length) === 1, 'участок без выноски не подсвечен на плане');
+    // Кусок газона, который уже посчитан в выноске соседа (40 м² на две фигуры по 20 м²), — не «без выноски»:
+    // нажатие на него выбирает участок той выноски.
+    const [px, py] = await planToScreen(page, 90, 8);
+    await page.mouse.click(px, py);
+    let rows0 = await page.evaluate(() => zonesPickedRows());
+    expect(rows0.length === 1 && rows0[0].pos === '3' && rows0[0].qty === 40 && !rows0[0].orphans, 'кусок газона при общей выноске 40 м²: ' + JSON.stringify(rows0));
+    await page.mouse.click(px, py);
     const [sx, sy] = await planToScreen(page, 75, 52.5);
     await page.mouse.click(sx, sy);
     const rows = await page.evaluate(() => zonesPickedRows());

@@ -4,8 +4,8 @@
 <svg id="plan" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60" preserveAspectRatio="xMidYMid meet"><g id="root"></g></svg>
 <script>
 const S=[["Деревья",[["1","Клен тестовый","шт.","5"]]],["Кустарники",[["2","Спирея тестовая","шт.","300"]]],["Газоны",[["3","Газон рулонный тестовый","м²","120"]]],["Мульча",[["4","Мульчирование тестовое","м²","10"]]]];
-const TIPS={"1":[[20,20],[80,20]],"2":[[30,30],[85,40]],"3":[[40,45],[90,7]]};
-const PLANZ="H4sIAAAAAAAAA7WVTW7bMBBGrzKYrNWQQ9KiAdM3yC4XkCXKEjpIHItFfpZd9Txdd9UTNDcqZMqJC9uMFbvQQiIgzPug94mcrYrQQMlF1znsAkJVhCLrHJbhCaEL6/uv3uGVEHld1wiVwxsDhicC+ssIyOJjZsQLXs9ny+2sdmdWWHs/rNjhrX/jrBzK7Wvr0mFoVzifbSLVLbPDK/J5pSiC5RTklGlDJsgIIvJ6+X+x+UlY4OqdzAseFo1DKcQ+98Ghgtcfr9+/4Hy29mXYTmoWCE8OJSE8x9tjW4XGoUJofLtsgkPq+bvi+O4fV2L4XgSS2IIdGVcejEupuPkF4uaJuO9ZF9+65phUSkud+sr7AUYGyLKMNZYCsv4xXacLka0AZU4hpxTRPrpXJESyU3YjifQ5nbJAmiXBZGRidTCxTCceaqXEebVSgqUCKZJ6a75/PKZXpfWW1k+KAacEaGKKejVk9GGvLgS2/b4s37ifaZXeBz84tAL+/Pr987Ahioa0PcMQEWjL0kKmRgY2BwPrVODcxJ/gnEYZIJYGzFitx+Xl/Vm6tWdO2Y1GjacpaMkUz7AJZLRziP0FdnCoUAIIAAA=";
+const TIPS={"1":[[20,20],[80,20]],"2":[[30,30],[85,40]],"3":[[40,45],[90,6]]};
+const PLANZ="H4sIAAAAAAAAA7WVQY6bMBSGr/L0Zk3HfraDI8W5QaUuegECJqA+zWTAVaZddtXzdN1VT9C5UUVMOqlC3KRJxQIsoff98H/gxaYIDZRc9L3DPiBURSiy3mEZnhH60D1+8A7vhMjrukaoHL41YHgmYDiMgCxeZkZ8xvvlYr2f1R7MCp3344odvve/ORuHcn9bVzoM7QaXi12kumV2eEc+rxRFsJyDnDPtyAQZQUTer/8vNj8LC1y9knnF46JxKIU45j45VPDy9eXLG1wuOl+G/aRmhfDsUBLCp3jatlVoHCqExrfrJjikgX9YHD/80ZUY3xeBJLZgL4wrJ+NSKm5+g7h5Iu5r1tXHvjlVKqVLnfvK+xFGBsiyjBpLAdlwmdbpRmQrQJlzyKmK6Bg9VCRE0im7K4n0NU5ZIM2SYHZhYjWZWKYTj1opcZ1WSrBUIEWy3poft6fqVel6S+tnxYhTAjQxxXo1ZPRXr24EtsN/edSKzvF5ittWDrnYPrwrupBm5WewUj7o44d8cmgF/Pz+49u0DRRt0PYKG4hAW5YWMnVhYDMZWKcC5yZ+cNfYa4BYGtCXVnm6vHzYt/ftmX805fR4moOWTHG/nEFGBxvmL8Ifae9uCAAA";
 (async()=>{const bin=Uint8Array.from(atob(PLANZ),c=>c.charCodeAt(0));
 document.getElementById("root").innerHTML=await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream("gzip"))).text();})();
 </script>

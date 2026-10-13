@@ -7054,6 +7054,7 @@
             st.rows.forEach(r => { if (r.pos && !(r.pos in units)) units[r.pos] = r.unit; });
             // Цвета позиций — по фигурам, на которые указывают выноски.
             const colorPos = {};
+            const gap = (p, q) => Math.hypot(Math.max(0, p.x - (q.x + q.width), q.x - (p.x + p.width)), Math.max(0, p.y - (q.y + q.height), q.y - (p.y + p.height)));
             items.forEach(it => {
                 if (it.g.dataset.src === 'tip') { const f = fillOf(it.g); if (f) (colorPos[f] ||= new Set()).add(it.pos); }
             });
@@ -7091,7 +7092,6 @@
                 if (cands.length > 1) {
                     // Цвет общий у нескольких позиций: берём позицию ближайшего к нему участка того же цвета
                     // (по расстоянию между контурами, соседний кусок газона обычно продолжение того же газона).
-                    const gap = (p, q) => Math.hypot(Math.max(0, p.x - (q.x + q.width), q.x - (p.x + p.width)), Math.max(0, p.y - (q.y + q.height), q.y - (p.y + p.height)));
                     let best = null;
                     items.forEach(it => {
                         if (it.g.dataset.src !== 'tip' || !cands.includes(it.pos) || fillOf(it.g) !== fill) return;
@@ -7101,7 +7101,28 @@
                     if (best) pr.pos = best.pos;
                     pr.guessed = true;
                 }
-                pr.qty = /м2|м²|кв\.?\s*м/i.test(units[pr.pos] || '') ? Math.round(pr.area * 10) / 10 : 0;
+                // Выноска соседнего участка того же типа часто считает оба куска сразу (проектировщик нарисовал газон
+                // двумя фигурами, а выноску поставил одну). Если в выноске соседа площади больше, чем нарисовано под её
+                // стрелкой, и этот запас покрывает фигуру, — фигура часть того участка, а не забытая.
+                const m2 = p => /м2|м²|кв\.?\s*м/i.test(units[p] || '');
+                const boxOf = q => q.els.map(e => e.getBBox()).reduce((u, r) => ({ x: Math.min(u.x, r.x), y: Math.min(u.y, r.y), width: Math.max(u.x + u.width, r.x + r.width) - Math.min(u.x, r.x), height: Math.max(u.y + u.height, r.y + r.height) - Math.min(u.y, r.y) }));
+                const host = [...st.parcels.values()]
+                    .filter(q => !q.orphan && cands.includes(q.pos) && m2(q.pos) && q.els.length && gap(b, boxOf(q)) < 0.5)
+                    .map(q => {
+                        if (q.drawn == null) q.drawn = parcelArea({ els: q.els.slice() }, '');
+                        return { q, spare: q.qty - q.drawn - (q.absorbed || 0) };
+                    })
+                    .filter(h => h.spare >= pr.area * 0.5)
+                    .sort((x, y) => y.spare - x.spare)[0];
+                if (host) {
+                    const q = host.q;
+                    q.absorbed = (q.absorbed || 0) + pr.area;
+                    q.els.push(g);
+                    st.parcelOf.set(g, [q.key]);
+                    st.parcelArea.set(g, b.width * b.height);
+                    return;
+                }
+                pr.qty = m2(pr.pos) ? Math.round(pr.area * 10) / 10 : 0;
                 pr.key += '#' + pr.pos;
                 st.parcels.set(pr.key, pr);
                 st.parcelOf.set(g, [pr.key]);
