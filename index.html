@@ -2515,6 +2515,7 @@
             if (isTaskDone(t)) return 'completed';
             return t.status === 'in_progress' || t.status === 'review' ? 'in_progress' : 'new';
         }
+        function taskProgress(t) { return isTaskDone(t) ? 100 : (t.progress || 0); }
         function isTaskOverdue(t, today) { return !isTaskDone(t) && !!t.dueDate && t.dueDate < today; }
 
         function renderProjectOverview() {
@@ -2548,7 +2549,7 @@
             updateStatBoxActiveHighlight();
 
             let avgProgress = 0;
-            if (total > 0) avgProgress = Math.round(projTasks.reduce((acc, t) => acc + (t.progress || 0), 0) / total);
+            if (total > 0) avgProgress = Math.round(projTasks.reduce((acc, t) => acc + taskProgress(t), 0) / total);
             document.getElementById('projectProgressPercent').innerText = `${avgProgress}%`;
             document.getElementById('projectProgressBar').style.width = `${avgProgress}%`;
         }
@@ -2845,7 +2846,7 @@
 
         function calculateGroupProgress(tasks) {
             if (!tasks || tasks.length === 0) return 0;
-            return Math.round(tasks.reduce((acc, t) => acc + (t.progress || 0), 0) / tasks.length);
+            return Math.round(tasks.reduce((acc, t) => acc + taskProgress(t), 0) / tasks.length);
         }
 
         function renderTaskRowHtml(task, canEditTasks, groupKeyAttr) {
@@ -2857,7 +2858,7 @@
             let deadlineBadge = isOverdue ? `<span class="bg-rose-100 text-rose-700 text-[10px] font-bold px-1.5 py-0.5 rounded inline-flex items-center gap-1"><i class="fa-solid fa-triangle-exclamation"></i>Просрочено</span>` : '';
 
             let statusBadge;
-            switch (task.status) {
+            switch (isTaskDone(task) ? 'completed' : task.status) {
                 case 'completed': statusBadge = `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-semibold px-2 py-0.5 rounded-full inline-flex items-center gap-1"><i class="fa-solid fa-circle-check text-emerald-600"></i>Завершено</span>`; break;
                 case 'in_progress': statusBadge = `<span class="bg-blue-100 text-blue-800 text-[10px] font-semibold px-2 py-0.5 rounded-full inline-flex items-center gap-1"><i class="fa-solid fa-spinner animate-spin text-blue-600"></i>В процессе</span>`; break;
                 case 'review': statusBadge = `<span class="bg-amber-100 text-amber-800 text-[10px] font-semibold px-2 py-0.5 rounded-full inline-flex items-center gap-1"><i class="fa-solid fa-eye text-amber-600"></i>На проверке</span>`; break;
@@ -2901,8 +2902,8 @@
                             ${canEditTasks ? `<button onclick="event.stopPropagation(); cycleTaskStatus('${task.id}')">${statusBadge}</button>` : statusBadge}
                         </div>
                         <div class="flex items-center gap-2 mt-2">
-                            <div class="flex-grow bg-slate-200 rounded-full h-1.5 overflow-hidden"><div class="bg-brand-600 h-1.5 rounded-full transition-all" style="width: ${task.progress || 0}%"></div></div>
-                            <span class="text-[10px] font-bold text-slate-500 w-8 text-right flex-shrink-0">${task.progress || 0}%</span>
+                            <div class="flex-grow bg-slate-200 rounded-full h-1.5 overflow-hidden"><div class="bg-brand-600 h-1.5 rounded-full transition-all" style="width: ${taskProgress(task)}%"></div></div>
+                            <span class="text-[10px] font-bold text-slate-500 w-8 text-right flex-shrink-0">${taskProgress(task)}%</span>
                         </div>
                     </div>
                     ${checkboxRight}
@@ -2935,16 +2936,27 @@
             await refreshAllData();
         }
 
+        const taskBeforeStruck = new Map();   // статус и процент до галочки — чтобы вернуть их, если галочку сняли по ошибке
         async function toggleTaskStruck(taskId) {
             const task = appData.tasks.find(t => t.id === taskId);
             if (!task) return;
             const newVal = !task.struck;
-            task.struck = newVal;
+            // Галочка = работа выполнена: статус «Завершено» и 100%. Снятая галочка возвращает прежние статус и процент
+            // (если они известны в этом сеансе), иначе работа становится «В процессе».
+            const before = { struck: task.struck, status: task.status, progress: task.progress };
+            const prev = taskBeforeStruck.get(taskId);
+            const patch = newVal
+                ? { struck: true, status: 'completed', progress: 100 }
+                : { struck: false, status: prev?.status && prev.status !== 'completed' ? prev.status : 'in_progress', progress: prev ? prev.progress || 0 : task.progress };
+            if (newVal) taskBeforeStruck.set(taskId, { status: task.status, progress: task.progress });
+            Object.assign(task, patch);
+            renderProjectOverview();
             renderTasksList(); // мгновенный визуальный отклик
 
-            const { error } = await sb.from('tasks').update({ struck: newVal }).eq('id', taskId);
+            const { error } = await sb.from('tasks').update(patch).eq('id', taskId);
             if (error) {
-                task.struck = !newVal;
+                Object.assign(task, before);
+                renderProjectOverview();
                 renderTasksList();
                 alert('Не удалось сохранить: ' + error.message);
                 return;
@@ -9552,21 +9564,20 @@
 
         function buildScheduleReportContainer(groupBy = 'category', statusFilter = 'all') {
             const proj = appData.projects.find(p => p.id === appData.currentProjectId);
-            // В отчёт не попадают зачёркнутые работы с прогрессом < 100% (считаются "скрытыми" черновиками/отменёнными).
-            // Зачёркнутые работы со 100% прогрессом — это выполненные работы, их показываем как обычно (с зачёркиванием названия).
+            // Зачёркнутая (отмеченная галочкой) работа — выполненная, в отчёте она идёт как «Завершено».
             let tasksList = appData.tasks
-                .filter(t => t.projectId === appData.currentProjectId && !(t.struck && (t.progress || 0) < 100));
+                .filter(t => t.projectId === appData.currentProjectId);
 
-            if (statusFilter === 'active') tasksList = tasksList.filter(t => t.status !== 'completed');
-            else if (statusFilter === 'completed') tasksList = tasksList.filter(t => t.status === 'completed');
+            if (statusFilter === 'active') tasksList = tasksList.filter(t => !isTaskDone(t));
+            else if (statusFilter === 'completed') tasksList = tasksList.filter(isTaskDone);
 
             tasksList = tasksList.slice().sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''));
 
             const total = tasksList.length;
-            const completed = tasksList.filter(t => t.status === 'completed').length;
-            const inProgress = tasksList.filter(t => t.status === 'in_progress' || t.status === 'review').length;
+            const completed = tasksList.filter(isTaskDone).length;
+            const inProgress = tasksList.filter(t => taskStatusGroup(t) === 'in_progress').length;
             const today = new Date().toISOString().split('T')[0];
-            const overdue = tasksList.filter(t => t.status !== 'completed' && t.dueDate && t.dueDate < today).length;
+            const overdue = tasksList.filter(t => isTaskOverdue(t, today)).length;
 
             const statusLabels = { new: 'Новая', in_progress: 'В процессе', review: 'На проверке', completed: 'Завершено' };
             const isByWorker = groupBy === 'worker';
@@ -9593,12 +9604,12 @@
 
             const groupsHtml = groupKeys.map(groupKey => {
                 const groupTasks = groupsMap[groupKey];
-                const groupCompleted = groupTasks.filter(t => t.status === 'completed').length;
+                const groupCompleted = groupTasks.filter(isTaskDone).length;
                 const groupTitle = groupTitleFor(groupKey);
 
                 const rows = groupTasks.map((t, idx) => {
                     const worker = appData.workers.find(w => w.id === t.workerId);
-                    const isOverdue = t.status !== 'completed' && t.dueDate && t.dueDate < today;
+                    const isOverdue = isTaskOverdue(t, today);
                     // При группировке по сотрудникам вместо колонки "Исполнитель" (она и так уже в заголовке
                     // группы) показываем участок работ — так колонка несёт полезную информацию, а не дублирует шапку.
                     const thirdColValue = isByWorker ? escapeHtml(t.category || 'Без участка') : escapeHtml(worker ? worker.name : 'Не назначен');
@@ -9609,8 +9620,8 @@
                             <td style="${REPORT_CELL_STYLE} width:150px;">${thirdColValue}</td>
                             <td style="${REPORT_CELL_STYLE} text-align:center; white-space:nowrap; width:85px;">${formatDateDisplay(t.startDate)}</td>
                             <td style="${REPORT_CELL_STYLE} text-align:center; white-space:nowrap; width:85px; ${isOverdue ? 'color:#dc2626; font-weight:700;' : ''}">${formatDateDisplay(t.dueDate)}</td>
-                            <td style="${REPORT_CELL_STYLE} text-align:center; width:95px;">${statusLabels[t.status] || t.status}${isOverdue ? '<div style="font-size:9px;color:#dc2626;font-weight:700;">ПРОСРОЧЕНО</div>' : ''}</td>
-                            <td style="${REPORT_CELL_STYLE} text-align:center; width:65px;">${t.progress || 0}%</td>
+                            <td style="${REPORT_CELL_STYLE} text-align:center; width:95px;">${isTaskDone(t) ? statusLabels.completed : (statusLabels[t.status] || t.status)}${isOverdue ? '<div style="font-size:9px;color:#dc2626;font-weight:700;">ПРОСРОЧЕНО</div>' : ''}</td>
+                            <td style="${REPORT_CELL_STYLE} text-align:center; width:65px;">${isTaskDone(t) ? 100 : (t.progress || 0)}%</td>
                         </tr>
                     `;
                 }).join('');

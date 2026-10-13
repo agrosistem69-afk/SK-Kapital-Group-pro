@@ -369,13 +369,39 @@ test('Задачи: счётчики сверху сходятся с разде
         const num = id => +document.getElementById(id).innerText;
         const heads = [...document.querySelectorAll('#tasksContainer h3')].map(h => h.closest('div.min-w-0').innerText.replace(/\s+/g, ' '));
         const filtered = v => { document.getElementById('statusFilter').value = v; return getFilteredTasks().map(t => t.id).join(','); };
-        return { total: num('statTotalTasks'), fresh: num('statNew'), prog: num('statInProgress'), done: num('statCompleted'), over: num('statOverdue'), heads,
+        const pdf = buildScheduleReportContainer('category').innerText;
+        return { pdfOver: (pdf.match(/ПРОСРОЧЕНО/g) || []).length,
+            total: num('statTotalTasks'), fresh: num('statNew'), prog: num('statInProgress'), done: num('statCompleted'), over: num('statOverdue'), heads,
             fNew: filtered('new'), fProg: filtered('in_progress'), fDone: filtered('completed'), fOver: filtered('overdue') };
     });
     expect(r.total === 5 && r.fresh === 1 && r.prog === 2 && r.done === 2 && r.over === 1, 'счётчики сверху: ' + JSON.stringify(r));
     expect(r.fresh + r.prog + r.done === r.total, 'Новые + В процессе + Завершено должно равняться Всего: ' + JSON.stringify(r));
     expect(r.heads.some(h => h.includes('Участок 1') && h.includes('0/2 готово')) && r.heads.some(h => h.includes('Участок 2') && h.includes('2/3 готово')), 'готово по участкам: ' + JSON.stringify(r.heads));
+    expect(r.pdfOver === 1, 'в PDF-отчёте просрочена только работа без галочки: ' + JSON.stringify(r));
     expect(r.fNew === 't1' && r.fProg === 't2,t3' && r.fDone === 't4,t5' && r.fOver === 't2', 'нажатие на счётчик показывает те же работы: ' + JSON.stringify(r));
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
+test('Задачи: галочка ставит «Завершено» и 100%, просрочка снимается', async () => {
+    const page = await openApp();
+    const r = await page.evaluate(async () => {
+        const d = n => getFormattedDate(n);
+        __db.tasks = [{ id: 'k1', project_id: 'p1', title: 'Газон', category: 'Участок 1', status: 'in_progress', progress: 40, due_date: d(-2) }];
+        appData.currentProjectId = 'p1';
+        await refreshAllData();
+        renderProjectOverview(); renderTasksList();
+        const num = id => +document.getElementById(id).innerText;
+        const s0 = { over: num('statOverdue'), done: num('statCompleted') };
+        await toggleTaskStruck('k1');
+        const row = { ...__db.tasks[0] };
+        const s1 = { over: num('statOverdue'), done: num('statCompleted'), badge: !!document.querySelector('#tasksContainer .bg-rose-100') };
+        await toggleTaskStruck('k1');
+        return { s0, s1, row, back: { ...__db.tasks[0] }, s2: { over: num('statOverdue'), done: num('statCompleted') } };
+    });
+    expect(r.s0.over === 1 && r.s0.done === 0, 'до галочки: ' + JSON.stringify(r.s0));
+    expect(r.row.struck === true && r.row.status === 'completed' && r.row.progress === 100, 'в базе после галочки: ' + JSON.stringify(r.row));
+    expect(r.s1.over === 0 && r.s1.done === 1 && !r.s1.badge, 'после галочки нет просрочки: ' + JSON.stringify(r.s1));
+    expect(r.back.struck === false && r.back.status === 'in_progress' && r.back.progress === 40 && r.s2.over === 1, 'галочку сняли — всё как было: ' + JSON.stringify(r));
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
