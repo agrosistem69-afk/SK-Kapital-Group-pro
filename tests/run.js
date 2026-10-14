@@ -520,6 +520,17 @@ test('Замечания: скачать картинкой — JPEG с план
     const name = await page.evaluate(() => window.__dlName);
     expect(/\.jpg$/.test(name) && /Лист 1/.test(name), 'имя файла: ' + name);
     expect(buf[0] === 0xff && buf[1] === 0xd8 && buf.length > 20000, `это не JPEG или он пустой: ${buf.length} байт`);
+    // Чёткая и без пустых полей: длинная сторона ~5000 точек, кадр по чертежу и пометкам, а не по окну.
+    const dims = await page.evaluate(async () => {
+        await notesFit();
+        const b = await notesBuildJpeg(), url = URL.createObjectURL(b);
+        const img = await new Promise(r => { const i = new Image(); i.onload = () => r(i); i.src = url; });
+        const reg = notesExportRegion(), plan = document.getElementById('notesPlan').getBBox();
+        return { w: img.naturalWidth, h: img.naturalHeight, reg, plan: [plan.x, plan.y, plan.width, plan.height], vb: notesState.vb };
+    });
+    expect(Math.max(dims.w, dims.h) >= 4500, 'картинка мелкая: ' + dims.w + '×' + dims.h);
+    expect(dims.reg[2] < dims.vb[2] * 0.999 || dims.reg[3] < dims.vb[3] * 0.999, 'пустые поля окна попали в картинку: ' + JSON.stringify(dims));
+    expect(near(dims.reg[2], dims.plan[2] * 1.03, dims.plan[2] * 0.02) || dims.reg[3] <= dims.plan[3] * 1.05, 'кадр не по чертежу: ' + JSON.stringify(dims));
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
