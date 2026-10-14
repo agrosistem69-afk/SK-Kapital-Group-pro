@@ -25,31 +25,65 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="SKKG Pro">
 
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- FontAwesome Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Google Font Inter -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <!-- Libraries for one-click PDF report generation -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <!-- Supabase client (auth + database + realtime) -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
+    <!-- Сторожок запуска. Если приложение не запустилось (не скачался файл, ошибка, нет связи),
+         вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
+         Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: { sans: ['Inter', 'sans-serif'] },
-                    colors: {
-                        brand: { 50: '#f0f9ff', 100: '#e0f2fe', 200: '#bae6fd', 500: '#0284c7', 600: '#0369a1', 700: '#075985' }
-                    }
-                }
-            }
-        }
+        window.APP_VERSION = '32';
+        window.__bootFailed = [];
+        window.addEventListener('error', function (e) {
+            var t = e.target;
+            if (t && t !== window && (t.src || t.href)) window.__bootFailed.push(String(t.src || t.href).replace(location.origin + '/', ''));
+            // Ошибка в коде до конца запуска: сразу говорим об этом, а не крутим загрузку.
+            else if (!window.__appStarted && e.message) setTimeout(function () { window.__bootProblem('Ошибка при запуске: ' + String(e.message).replace(/[<>&"]/g, '')); }, 0);
+        }, true);
+        window.__bootProblem = function (why) {
+            if (window.__appStarted || document.getElementById('bootProblem')) return;
+            var d = document.createElement('div');
+            d.id = 'bootProblem';
+            d.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#0f172a;color:#e2e8f0;font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto';
+            var files = window.__bootFailed.length ? '<p style="margin:0 0 10px;font-size:13px;color:#94a3b8">Не скачалось: ' + window.__bootFailed.join(', ').replace(/[<>&"]/g, '') + '</p>' : '';
+            d.innerHTML = '<div style="max-width:420px;width:100%">'
+                + '<div style="font-size:19px;font-weight:600;margin-bottom:8px">Приложение не открылось</div>'
+                + '<p style="margin:0 0 10px;color:#cbd5e1">' + why + '</p>' + files
+                + '<div id="bootNet" style="font-size:13px;margin:0 0 14px;color:#94a3b8">Проверяю связь…</div>'
+                + '<button id="bootReload" style="display:block;width:100%;padding:12px;margin-bottom:8px;border:0;border-radius:10px;background:#0369a1;color:#fff;font-size:15px;font-weight:600">Обновить</button>'
+                + '<button id="bootReset" style="display:block;width:100%;padding:12px;border:1px solid #475569;border-radius:10px;background:transparent;color:#e2e8f0;font-size:15px">Сбросить сохранённые файлы и обновить</button>'
+                + '<p style="margin:10px 0 0;font-size:12px;color:#64748b">Вход в систему при сбросе сохраняется. Версия ' + window.APP_VERSION + '.</p></div>';
+            (document.body || document.documentElement).appendChild(d);
+            document.getElementById('bootReload').onclick = function () { location.reload(); };
+            document.getElementById('bootReset').onclick = window.__resetAppFiles;
+            var checks = [['Сайт skkg.ru', 'version.json?t=' + Date.now()], ['База данных', 'https://pgejlzsfofkgdsgwptfa.supabase.co/auth/v1/health']];
+            var res = [];
+            checks.forEach(function (c, i) {
+                var done = false, mark = function (ok) { if (done) return; done = true; res[i] = c[0] + ': ' + (ok ? 'есть связь' : 'нет связи'); document.getElementById('bootNet').textContent = res.filter(Boolean).join(' · '); };
+                setTimeout(function () { mark(false); }, 8000);
+                fetch(c[1], { mode: 'no-cors', cache: 'no-store' }).then(function () { mark(true); }, function () { mark(false); });
+            });
+        };
+        // Сбросить сохранённые на устройстве файлы сайта (не вход): служебный обработчик и кэш.
+        window.__resetAppFiles = function () {
+            var jobs = [];
+            if (navigator.serviceWorker) jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); }));
+            if (window.caches) jobs.push(caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); }));
+            Promise.all(jobs).catch(function () {}).then(function () { location.replace(location.pathname + '?r=' + Date.now()); });
+        };
+        setTimeout(function () { window.__bootProblem('Загрузка идёт слишком долго. Скорее всего, плохая связь или не скачались файлы сайта.'); }, 20000);
     </script>
+
+    <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
+         не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
+         Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
+    <link rel="stylesheet" href="vendor/app.css?v=32">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=32">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=32">
+    <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
+    <script src="vendor/html2canvas.min.js?v=32" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=32" defer></script>
+    <script src="vendor/jszip.min.js?v=32" defer></script>
+    <!-- Supabase client (auth + database + realtime) -->
+    <script src="vendor/supabase.js?v=32"></script>
+
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
@@ -6077,7 +6111,7 @@
             if (window.XLSX) return Promise.resolve();
             if (!xlsxLoading) xlsxLoading = new Promise((resolve, reject) => {
                 const sc = document.createElement('script');
-                sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+                sc.src = 'vendor/xlsx.full.min.js?v=' + window.APP_VERSION;
                 sc.onload = resolve; sc.onerror = () => { xlsxLoading = null; reject(new Error('Не удалось загрузить модуль чтения Excel. Проверьте интернет.')); };
                 document.head.appendChild(sc);
             });
@@ -9099,7 +9133,7 @@
             if (window.jspdf?.jsPDF) return Promise.resolve();
             if (!jspdfLoading) jspdfLoading = new Promise((resolve, reject) => {
                 const sc = document.createElement('script');
-                sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+                sc.src = 'vendor/jspdf.umd.min.js?v=' + window.APP_VERSION;
                 sc.onload = resolve; sc.onerror = () => { jspdfLoading = null; reject(new Error('Не удалось загрузить модуль PDF. Проверьте интернет.')); };
                 document.head.appendChild(sc);
             });
@@ -10690,9 +10724,33 @@
         // -------------------- PWA: регистрация Service Worker --------------------
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' }).catch(err => console.warn('SW registration failed:', err));
+                navigator.serviceWorker.register('service-worker.js?v=' + window.APP_VERSION, { updateViaCache: 'none' }).catch(err => console.warn('SW registration failed:', err));
             });
         }
+
+        // -------------------- Новая версия сайта --------------------
+        // После публикации меняется version.json. Приложение сверяет его при открытии, при возвращении
+        // в приложение и раз в 5 минут; если версия новее — внизу появляется кнопка «Обновить».
+        async function checkForNewVersion() {
+            try {
+                const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+                if (!r.ok) return;
+                const { version } = await r.json();
+                if (version && String(version) !== window.APP_VERSION) showUpdateBanner(String(version));
+            } catch (e) { /* нет связи — проверим позже */ }
+        }
+        function showUpdateBanner(version) {
+            if (document.getElementById('updateBanner')) return;
+            const d = document.createElement('div');
+            d.id = 'updateBanner';
+            d.className = 'fixed left-3 right-3 bottom-24 sm:left-auto sm:right-6 sm:bottom-6 sm:w-96 z-[90] bg-slate-900 text-white rounded-xl shadow-xl p-3 flex items-center gap-3';
+            d.innerHTML = `<i class="fa-solid fa-rotate text-brand-200"></i><div class="flex-grow text-sm">Вышла новая версия приложения</div><button class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-3 py-2 rounded-lg">Обновить</button>`;
+            d.querySelector('button').onclick = () => window.__resetAppFiles();
+            document.body.appendChild(d);
+        }
+        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkForNewVersion(); });
+        setInterval(checkForNewVersion, 5 * 60 * 1000);
+        setTimeout(checkForNewVersion, 3000);
 
         // -------------------- PWA: видимая кнопка "Установить приложение" --------------------
         // Если событие уже было поймано ранним перехватчиком в <head> (см. начало файла) — используем его
@@ -10748,6 +10806,9 @@
                 alert('Чтобы установить приложение, откройте меню браузера (обычно значок ⋮ или "Поделиться") и выберите "Установить приложение" / "Добавить на главный экран".');
             }
         }
+
+        // Запуск дошёл до конца — сторожок в начале страницы больше не нужен.
+        window.__appStarted = true;
     </script>
 </body>
 </html>

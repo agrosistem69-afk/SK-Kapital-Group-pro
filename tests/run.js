@@ -23,7 +23,7 @@ function buildCss() {
     const out = path.join(__dirname, '.tailwind.css');
     const input = path.join(__dirname, '.tailwind-in.css');
     fs.writeFileSync(input, '@tailwind base;@tailwind components;@tailwind utilities;');
-    execFileSync(process.execPath, [require.resolve('tailwindcss/lib/cli.js'), '-c', path.join(__dirname, 'tailwind.config.js'), '-i', input, '-o', out], { stdio: 'ignore' });
+    execFileSync(process.execPath, [require.resolve('tailwindcss/lib/cli.js'), '-c', path.join(__dirname, 'tailwind.config.js'), '-i', input, '-o', out, '--minify'], { stdio: 'ignore' });
     return fs.readFileSync(out, 'utf8');
 }
 
@@ -50,8 +50,9 @@ async function openApp({ role = 'manager', admin = false, width = 1280, height =
     page.on('pageerror', e => page.errors.push(e.message));
     // Всё внешнее отключаем; нужные библиотеки подставляем локально (последнее правило главнее).
     await page.route(/^https?:\/\/(?!127\.0\.0\.1)/, r => r.fulfill({ status: 200, body: '' }));
-    await page.route(/supabase-js/, r => r.fulfill({ contentType: 'application/javascript', body: FAKE_SUPABASE }));
-    await page.route(/cdn\.tailwindcss\.com/, r => r.fulfill({ contentType: 'application/javascript', body: `window.tailwind={};var s=document.createElement('style');s.textContent=${JSON.stringify(css)};document.head.appendChild(s);` }));
+    await page.route(/vendor\/supabase\.js/, r => r.fulfill({ contentType: 'application/javascript', body: FAKE_SUPABASE }));
+    // Оформление собираем из текущего index.html, чтобы проверки видели все новые классы.
+    await page.route(/vendor\/app\.css/, r => r.fulfill({ contentType: 'text/css', body: css }));
     // Служебный обработчик (service worker) в тестах пустой, чтобы он не кэшировал файлы между проверками.
     await page.route(/service-worker\.js/, r => r.fulfill({ contentType: 'application/javascript', body: 'self.addEventListener("install", () => self.skipWaiting());' }));
     await page.route(/xlsx[^/]*\.js/, r => r.fulfill({ contentType: 'application/javascript', body: XLSX_JS }));
@@ -629,7 +630,7 @@ test('Приложение открывается повторно через se
     const context = await browser.newContext();
     const page = await context.newPage();
     await page.route(/^https?:\/\/(?!127\.0\.0\.1)/, r => r.fulfill({ status: 200, body: '' }));
-    await page.route(/supabase-js/, r => r.fulfill({ contentType: 'application/javascript', body: FAKE_SUPABASE }));
+    await page.route(/vendor\/supabase\.js/, r => r.fulfill({ contentType: 'application/javascript', body: FAKE_SUPABASE }));
     await page.goto(baseUrl + '/');
     const ok = await page.evaluate(() => Promise.race([
         navigator.serviceWorker.ready.then(() => new Promise(r => navigator.serviceWorker.controller ? r(true) : navigator.serviceWorker.addEventListener('controllerchange', () => r(true)))),
@@ -641,6 +642,96 @@ test('Приложение открывается повторно через se
         expect(resp && resp.ok && resp.ok(), `через service worker страница ${url} не открылась: ${resp && resp.message || resp && resp.status()}`);
         expect(await page.evaluate(() => !!navigator.serviceWorker.controller && !!document.getElementById('scheduleScreen')), `страница ${url} открылась не через service worker или без нужного содержимого`);
     }
+});
+
+// ---- Сайт открывается всегда ----
+const ROOT_FILE = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
+
+test('Все библиотеки и стили — с нашего сайта, а не с чужих серверов', async () => {
+    const html = ROOT_FILE('index.html');
+    const head = html.slice(0, html.indexOf('</head>'));
+    const ext = [...head.matchAll(/<(?:script|link)[^>]+(?:src|href)="(https?:[^"]+)"/g)].map(m => m[1]);
+    expect(!ext.length, 'в начале страницы подключено с чужих серверов: ' + ext.join(', '));
+    const loaders = [...html.matchAll(/\.src\s*=\s*['"](https?:[^'"]+)/g)].map(m => m[1]);
+    expect(!loaders.length, 'библиотеки догружаются с чужих серверов: ' + loaders.join(', '));
+    const local = [...html.matchAll(/(?:src|href)="(vendor\/[^"?]+)/g)].map(m => m[1]);
+    const sw = ROOT_FILE('service-worker.js');
+    const swFiles = [...sw.matchAll(/'(vendor\/[^']+|icons\/[^']+|manifest\.json)'/g)].map(m => m[1]);
+    const missing = [...local, ...swFiles].filter(f => !fs.existsSync(path.join(ROOT, f)));
+    expect(local.length >= 6 && !missing.length, 'нет файлов на сайте: ' + missing.join(', '));
+    const fa = ROOT_FILE('vendor/fontawesome/css/all.min.css');
+    const fonts = [...fa.matchAll(/url\(\.\.\/webfonts\/([^)]+\.woff2)\)/g)].map(m => m[1]).filter(f => !fs.existsSync(path.join(ROOT, 'vendor/fontawesome/webfonts', f)));
+    expect(!fonts.length, 'нет файлов иконок: ' + fonts.join(', '));
+});
+
+test('Версия одна во всех местах: страница, ссылки ?v=, service worker, version.json', async () => {
+    const html = ROOT_FILE('index.html');
+    const v = (html.match(/window\.APP_VERSION = '([^']+)'/) || [])[1];
+    const vs = new Set([...html.matchAll(/\?v=([0-9a-z.-]+)"/g)].map(m => m[1]));
+    const sw = (ROOT_FILE('service-worker.js').match(/const VERSION = '([^']+)'/) || [])[1];
+    const vj = JSON.parse(ROOT_FILE('version.json')).version;
+    expect(v && vs.size === 1 && vs.has(v) && sw === v && vj === v, `версии разные: страница ${v}, ссылки ${[...vs]}, service worker ${sw}, version.json ${vj}`);
+});
+
+test('Оформление vendor/app.css собрано из текущей страницы', async () => {
+    const built = ROOT_FILE('vendor/app.css');
+    expect(built === css, 'vendor/app.css устарел: в папке tests выполните «npm run css» и закоммитьте его');
+});
+
+test('Не скачалась библиотека — вместо вечной загрузки понятное сообщение и сброс', async () => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 800 } });
+    const page = await context.newPage();
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1)/, r => r.abort());
+    await page.route(/vendor\/supabase\.js/, r => r.abort());
+    await page.goto(baseUrl + '/index.html');
+    await page.waitForSelector('#bootProblem', { timeout: 10000 });
+    const text = await page.$eval('#bootProblem', e => e.innerText);
+    expect(text.includes('Приложение не открылось') && text.includes('vendor/supabase.js'), 'сообщение без причины: ' + text);
+    expect(await visible(page, '#bootReset'), 'нет кнопки сброса');
+    await page.waitForFunction(() => /связ/.test(document.getElementById('bootNet').textContent) && !/Проверяю/.test(document.getElementById('bootNet').textContent), null, { timeout: 12000 });
+    // Сброс удаляет сохранённые файлы и перезагружает страницу, вход (localStorage) не трогает.
+    await page.evaluate(async () => { localStorage.setItem('workcontrol-auth', 'x'); const c = await caches.open('test-old'); await c.put('/x', new Response('1')); });
+    await page.unroute(/vendor\/supabase\.js/);
+    await page.route(/vendor\/supabase\.js/, r => r.fulfill({ contentType: 'application/javascript', body: FAKE_SUPABASE }));
+    await Promise.all([page.waitForURL(/\?r=\d+/), page.click('#bootReset')]);
+    await page.waitForFunction(() => window.__appStarted, null, { timeout: 10000 });
+    const after = await page.evaluate(async () => ({ caches: (await caches.keys()).filter(k => k === 'test-old').length, auth: localStorage.getItem('workcontrol-auth') }));
+    expect(after.caches === 0 && after.auth === 'x', 'сброс сработал неправильно: ' + JSON.stringify(after));
+    expect(!(await page.$('#bootProblem')), 'после сброса сообщение не пропало');
+});
+
+test('После публикации новой версии появляется кнопка «Обновить»', async () => {
+    const page = await openApp({ width: 390, height: 800 });
+    await page.route(/version\.json/, r => r.fulfill({ contentType: 'application/json', body: '{"version":"999"}' }));
+    await page.evaluate(() => checkForNewVersion());
+    await page.waitForSelector('#updateBanner', { timeout: 5000 });
+    const box = await page.$eval('#updateBanner', e => { const r = e.getBoundingClientRect(); return [r.left, r.right, r.bottom]; });
+    expect(box[0] >= 0 && box[1] <= 390 && box[2] <= 800, 'кнопка «Обновить» не помещается на экране телефона: ' + box);
+    await page.unroute(/version\.json/);
+    await page.route(/version\.json/, r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ version: ROOT_FILE('version.json').match(/"version":\s*"([^"]+)/)[1] }) }));
+    const page2 = await openApp();
+    await page2.evaluate(() => checkForNewVersion());
+    await page2.waitForTimeout(500);
+    expect(!(await page2.$('#updateBanner')), 'кнопка «Обновить» появилась без новой версии');
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
+test('Без связи приложение открывается из сохранённых на телефоне файлов', async () => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 800 } });
+    const page = await context.newPage();
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1)/, r => r.abort());
+    await page.route(/vendor\/supabase\.js/, r => r.fulfill({ contentType: 'application/javascript', body: FAKE_SUPABASE }));
+    await page.goto(baseUrl + '/');
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    await page.reload();
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller);
+    await context.setOffline(true);
+    await page.reload();
+    await page.waitForFunction(() => window.__appStarted, null, { timeout: 15000 });
+    const ok = await page.evaluate(() => ({ supa: typeof supabase === 'object', css: getComputedStyle(document.getElementById('authCheckingScreen') || document.body).position, icons: [...document.fonts].some(f => /Font Awesome/.test(f.family)) }));
+    expect(ok.supa, 'без связи не открылась библиотека базы');
+    expect(!(await page.$('#bootProblem')), 'без связи появилось сообщение об ошибке запуска');
+    await context.setOffline(false);
 });
 
 // План-график. Сегодняшнюю дату в тестах задаём сами, чтобы расчёты не зависели от дня запуска.
@@ -831,7 +922,7 @@ test('План-график на телефоне: диаграмма, люди 
 
 // ================= ЗАПУСК =================
 // Для снимков экрана файл можно подключить из другого скрипта: тогда проверки не запускаются.
-module.exports = { openApp, openSchedule, start: async () => { css = buildCss(); const server = await startServer(); baseUrl = `http://127.0.0.1:${server.address().port}`; browser = await chromium.launch(); return { server, browser }; } };
+module.exports = { buildCss, openApp, openSchedule, start: async () => { css = buildCss(); const server = await startServer(); baseUrl = `http://127.0.0.1:${server.address().port}`; browser = await chromium.launch(); return { server, browser }; } };
 if (require.main === module) (async () => {
     css = buildCss();
     const server = await startServer();

@@ -40,8 +40,9 @@ jobs:
       - name: Поиск секретов в коде
         run: |
           # Публичный ключ Supabase (sb_publishable_...) разрешён: он предназначен для браузера.
+          # vendor/ — чужие библиотеки как есть (в supabase.js есть проверка на префикс «sb_secret_»).
           patterns='sb_secret_|service_role"?[[:space:]]*[:=][[:space:]]*["'"'"']ey|-----BEGIN [A-Z ]*PRIVATE KEY|ghp_[A-Za-z0-9]{30,}|github_pat_|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|[0-9]{8,10}:AA[A-Za-z0-9_-]{30,}|(password|passwd|ftp_pass)[[:space:]]*[:=][[:space:]]*["'"'"'][^"'"'"'$]{4,}'
-          if git grep -nIE "$patterns" -- . ':!.github/workflows/ci.yml'; then
+          if git grep -nIE "$patterns" -- . ':!.github/workflows/ci.yml' ':!vendor/**'; then
             echo "::error::Похоже на секрет в коде. Уберите его и храните в GitHub Secrets или на хостинге."
             exit 1
           fi

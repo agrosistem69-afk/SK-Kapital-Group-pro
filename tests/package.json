@@ -3,7 +3,8 @@
   "private": true,
   "description": "Автотесты SKKG Pro: робот открывает приложение и проверяет основные функции",
   "scripts": {
-    "test": "node run.js"
+    "test": "node run.js",
+    "css": "node build-css.js"
   },
   "devDependencies": {
     "jspdf": "^2.5.1",

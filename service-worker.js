@@ -1,25 +1,48 @@
-// WorkControl Pro — Service Worker
-// Стратегия: "сеть в приоритете" (network-first) для HTML, чтобы пользователь
-// всегда получал самую свежую версию сайта после обновления, и при этом
-// оставалась базовая офлайн-доступность на случай пропажи связи.
-// При каждом обновлении файлов сайта меняйте CACHE_NAME (например, v2, v3...),
-// чтобы у пользователей автоматически подтянулась новая версия.
+// SKKG Pro — Service Worker
+// Задача: приложение открывается всегда, даже при плохой связи, и при этом сразу показывает
+// новую версию после публикации.
+// • Страница (index.html) — сначала сеть, без кэша браузера и хостинга; нет сети — сохранённая копия.
+// • Библиотеки, оформление, шрифты, иконки (всё своё, из папки vendor) — сохраняются на устройстве
+//   при установке и отдаются сразу. Ссылки на них содержат ?v=версия, поэтому новая версия
+//   скачивается заново, а старая удаляется.
+// • version.json и всё чужое (база Supabase и т.п.) не трогаем.
+// При каждой публикации меняйте версию: CACHE_NAME здесь, APP_VERSION и ?v= в index.html,
+// version.json. Автотест проверяет, что они совпадают.
 
-const CACHE_NAME = 'workcontrol-cache-v31';
-const PRECACHE_URLS = [
-    './',
-    './index.html',
-    './manifest.json',
-    './icons/icon-192.png',
-    './icons/icon-512.png'
-];
+const VERSION = '32';
+const CACHE_NAME = 'workcontrol-cache-v' + VERSION;
+const CORE = [
+    'vendor/app.css',
+    'vendor/fontawesome/css/all.min.css',
+    'vendor/inter/inter.css',
+    'vendor/supabase.js',
+    'vendor/html2canvas.min.js',
+    'vendor/jspdf.umd.min.js',
+    'vendor/jszip.min.js',
+].map((u) => u + '?v=' + VERSION).concat([
+    'vendor/fontawesome/webfonts/fa-solid-900.woff2',
+    'vendor/fontawesome/webfonts/fa-regular-400.woff2',
+    'manifest.json',
+    'icons/icon-192.png',
+    'icons/icon-512.png',
+]);
+
+// Свежая копия с сервера: метка в адресе обходит кэш хостинга, no-store — кэш браузера.
+function fresh(url) {
+    const u = new URL(url, self.location.href);
+    u.searchParams.set('_', Date.now());
+    return fetch(u.href, { cache: 'no-store', credentials: 'same-origin' });
+}
 
 self.addEventListener('install', (event) => {
-    event.waitUntil(
-        caches.open(CACHE_NAME)
-            .then((cache) => cache.addAll(PRECACHE_URLS))
-            .then(() => self.skipWaiting())
-    );
+    event.waitUntil((async () => {
+        const cache = await caches.open(CACHE_NAME);
+        // Файлы ставим по одному: если какой-то не скачался, остальные всё равно сохранятся.
+        await Promise.all(CORE.map((u) => fetch(u, { cache: 'no-store' }).then((r) => r.ok && cache.put(u, r)).catch(() => {})));
+        const page = await fresh('./index.html').catch(() => null);
+        if (page && page.ok) await cache.put('./index.html', page);
+        await self.skipWaiting();
+    })());
 });
 
 self.addEventListener('activate', (event) => {
@@ -32,37 +55,34 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
     const { request } = event;
+    const url = new URL(request.url);
+    if (url.origin !== self.location.origin || request.method !== 'GET') return;
+    if (url.pathname.endsWith('/version.json')) return;
 
-    // Запросы к Supabase и другим внешним сервисам (API, CDN) не трогаем —
-    // пусть браузер обрабатывает их как обычно, без кэширования.
-    if (new URL(request.url).origin !== self.location.origin) return;
-    if (request.method !== 'GET') return;
-
-    // HTML-страницы — всегда сначала пробуем сеть, чтобы не показывать устаревшую версию.
+    // Страница приложения: сначала сеть. Если связи нет или сервер долго молчит — сохранённая копия.
     if (request.mode === 'navigate' || request.destination === 'document') {
-        event.respondWith(
-            // cache: 'no-store' — не брать страницу из кэша браузера, иначе после публикации телефон может показывать старую версию.
-            fetch(request, { cache: 'no-store' })
-                .then((response) => {
-                    const copy = response.clone();
-                    caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-                    return response;
-                })
-                .catch(() => caches.match(request).then((cached) => cached || caches.match('./index.html')))
-        );
+        event.respondWith((async () => {
+            const cache = await caches.open(CACHE_NAME);
+            const net = fresh(request.url).then((r) => {
+                if (r.ok) cache.put('./index.html', r.clone());
+                return r;
+            });
+            const cached = await cache.match('./index.html');
+            if (!cached) return net.catch(() => new Response('Нет связи с сайтом. Проверьте интернет и обновите страницу.', { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } }));
+            // Ждём сеть до 6 секунд, потом показываем сохранённую версию (новая подтянется при следующем открытии).
+            const slow = new Promise((resolve) => setTimeout(() => resolve(cached), 6000));
+            return Promise.race([net.catch(() => cached), slow]);
+        })());
         return;
     }
 
-    // Статические файлы (иконки, манифест и т.д.) — сначала кэш, для скорости и офлайна,
-    // а в фоне подтягиваем свежую версию на будущее.
-    event.respondWith(
-        caches.match(request).then((cached) => {
-            const networkFetch = fetch(request).then((response) => {
-                const copy = response.clone();
-                caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-                return response;
-            }).catch(() => cached);
-            return cached || networkFetch;
-        })
-    );
+    // Свои файлы: сначала сохранённые на устройстве, иначе сеть (и сохраняем на будущее).
+    event.respondWith((async () => {
+        const cache = await caches.open(CACHE_NAME);
+        const cached = await cache.match(request);
+        if (cached) return cached;
+        const r = await fetch(request);
+        if (r.ok && (url.pathname.includes('/vendor/') || url.pathname.includes('/icons/'))) cache.put(request, r.clone());
+        return r;
+    })());
 });
