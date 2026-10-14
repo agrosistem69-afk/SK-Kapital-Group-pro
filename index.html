@@ -1675,11 +1675,30 @@
                 <div id="drawingViewerTitle" class="text-sm font-semibold truncate"></div>
                 <div id="drawingViewerMeta" class="text-[11px] text-slate-400 truncate"></div>
             </div>
-            <button onclick="closeDrawingViewer()" class="w-9 h-9 flex-shrink-0 rounded-lg hover:bg-white/10 flex items-center justify-center" title="Закрыть"><i class="fa-solid fa-xmark"></i></button>
+            <div class="flex items-center gap-1 flex-shrink-0">
+                <button id="notesToggleBtn" onclick="toggleDrawingNotes()" class="h-9 px-3 rounded-lg bg-white/10 hover:bg-white/20 flex items-center gap-2 text-sm font-semibold" title="Замечания на чертеже"><i class="fa-solid fa-pen-to-square"></i><span id="notesToggleLabel">Замечания</span></button>
+                <button onclick="closeDrawingViewer()" class="w-9 h-9 flex-shrink-0 rounded-lg hover:bg-white/10 flex items-center justify-center" title="Закрыть"><i class="fa-solid fa-xmark"></i></button>
+            </div>
         </div>
         <div class="relative flex-1 bg-white">
             <div id="drawingViewerLoading" class="absolute inset-0 flex items-center justify-center text-sm text-slate-400">Загрузка чертежа...</div>
             <iframe id="drawingViewerFrame" sandbox="allow-scripts" referrerpolicy="no-referrer" class="absolute inset-0 w-full h-full border-0"></iframe>
+            <!-- Замечания: тот же план, но нарисованный приложением, чтобы пометки лежали в координатах чертежа -->
+            <div id="notesStage" class="absolute inset-0 hidden flex-col md:flex-row bg-white">
+                <div class="relative flex-1 min-h-0 flex flex-col">
+                    <div id="notesToolbar" class="flex items-center gap-1 px-2 py-1.5 border-b border-slate-200 bg-slate-50 overflow-x-auto"></div>
+                    <div class="relative flex-1 min-h-0">
+                        <svg id="notesSvg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" class="absolute inset-0 w-full h-full touch-none select-none"><g id="notesPlan"></g><g id="notesMarks"></g><g id="notesDraft"></g></svg>
+                        <div id="notesMsg" class="absolute inset-0 hidden items-center justify-center text-sm text-slate-500 p-6 text-center bg-white"></div>
+                        <div class="absolute right-2 bottom-2 flex flex-col gap-1">
+                            <button onclick="notesZoomButton(1 / 1.6)" class="w-9 h-9 bg-white border border-slate-300 rounded-lg shadow-sm text-slate-700" title="Приблизить"><i class="fa-solid fa-plus"></i></button>
+                            <button onclick="notesZoomButton(1.6)" class="w-9 h-9 bg-white border border-slate-300 rounded-lg shadow-sm text-slate-700" title="Отдалить"><i class="fa-solid fa-minus"></i></button>
+                            <button onclick="notesFit()" class="w-9 h-9 bg-white border border-slate-300 rounded-lg shadow-sm text-slate-700" title="Весь лист"><i class="fa-solid fa-expand"></i></button>
+                        </div>
+                    </div>
+                </div>
+                <aside id="notesList" class="w-full md:w-80 max-h-[38vh] md:max-h-none overflow-y-auto border-t md:border-t-0 md:border-l border-slate-200 p-3 bg-white"></aside>
+            </div>
             <div id="drawingViewerWatermark" class="absolute inset-0 pointer-events-none overflow-hidden select-none"></div>
         </div>
     </div>
@@ -1689,6 +1708,10 @@
         #zonesSvg .st[stroke], #zonesSvg .ln { fill: none; stroke-width: .6px; vector-effect: non-scaling-stroke; }
         #zonesSvg .ld .ln { stroke-width: .7px; }
         #zonesSvg .hb { fill: #fff; fill-opacity: .75; stroke: none; }
+        #notesSvg .st[stroke], #notesSvg .ln { fill: none; stroke-width: .6px; vector-effect: non-scaling-stroke; }
+        #notesSvg .ld .ln { stroke-width: .7px; }
+        #notesSvg .hb { fill: #fff; fill-opacity: .75; stroke: none; }
+        #notesSvg #notesPlan { pointer-events: none; }
         #zonesSvg { cursor: grab; }
         #zonesSvg.zones-picking { cursor: pointer; }
         #zonesSvg.zones-picking g.it[data-p]:not(.ld) path { pointer-events: all; }
@@ -8580,6 +8603,7 @@
             frame.removeAttribute('src');
             loading.classList.remove('hidden');
             loading.textContent = 'Загрузка чертежа...';
+            notesReset(d);
             openModal('drawingViewerModal');
 
             // Supabase Storage отдаёт HTML как обычный текст, поэтому скачиваем файл
@@ -8590,6 +8614,7 @@
                 return;
             }
             const html = await blob.text();
+            if (notesState?.drawing === d) notesState.html = html;
             if (drawingViewerUrl) URL.revokeObjectURL(drawingViewerUrl);
             drawingViewerUrl = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
             frame.onload = () => loading.classList.add('hidden');
@@ -8597,10 +8622,362 @@
         }
 
         function closeDrawingViewer() {
+            notesReset(null);
             closeModal('drawingViewerModal');
             const frame = document.getElementById('drawingViewerFrame');
             frame.removeAttribute('src');
             if (drawingViewerUrl) { URL.revokeObjectURL(drawingViewerUrl); drawingViewerUrl = null; }
+        }
+
+
+        // -------------------- ЗАМЕЧАНИЯ НА ЧЕРТЕЖАХ --------------------
+        // Поверх плана листа: прямоугольник, круг, стрелка, линия от руки, подпись. Координаты — в единицах
+        // чертежа, поэтому пометки остаются на месте при масштабе и в новой редакции листа (привязка по названию).
+        // Рисуют и видят все участники проекта; удалить чужое может только ответственный за чертежи.
+        const NOTE_COLORS = ['#dc2626', '#ea580c', '#ca8a04', '#16a34a', '#2563eb', '#111827'];
+        const NOTE_TOOLS = [['pan', 'fa-hand', 'Двигать и выбирать'], ['rect', 'fa-square', 'Прямоугольник'], ['ellipse', 'fa-circle', 'Круг'],
+            ['arrow', 'fa-arrow-right-long', 'Стрелка'], ['pen', 'fa-pen', 'Линия от руки'], ['text', 'fa-font', 'Подпись']];
+        let notesState = null, notesPointerReady = false;
+
+        function notesReset(drawing) {
+            notesState = drawing ? { drawing, projectId: drawing.project_id, sheet: normName(drawing.sheet), html: null, plan: null, vb: null, baseVb: null,
+                tool: 'pan', color: NOTE_COLORS[0], marks: [], draft: null, selected: null, open: false, error: '' } : null;
+            document.getElementById('notesStage').classList.add('hidden');
+            document.getElementById('notesStage').classList.remove('flex');
+            document.getElementById('drawingViewerFrame').classList.remove('hidden');
+            const lbl = document.getElementById('notesToggleLabel');
+            if (lbl) lbl.textContent = 'Замечания';
+        }
+        const notesMyId = () => currentUserProfile?.id || null;
+        const notesCanEdit = m => !!m && (m.author_id === notesMyId() || canManageDrawings);
+
+        async function toggleDrawingNotes() {
+            const st = notesState;
+            if (!st) return;
+            const stage = document.getElementById('notesStage');
+            st.open = !st.open;
+            stage.classList.toggle('hidden', !st.open);
+            stage.classList.toggle('flex', st.open);
+            document.getElementById('drawingViewerFrame').classList.toggle('hidden', st.open);
+            document.getElementById('notesToggleLabel').textContent = st.open ? 'К чертежу' : 'Замечания';
+            if (!st.open) return;
+            if (!notesPointerReady) { initNotesPointer(); notesPointerReady = true; }
+            if (!st.plan) await notesLoad();
+            notesRender();
+        }
+
+        async function notesLoad() {
+            const st = notesState, msg = document.getElementById('notesMsg');
+            const show = t => { msg.textContent = t; msg.classList.toggle('hidden', !t); msg.classList.toggle('flex', !!t); };
+            show('Открываю план...');
+            if (!st.html) {
+                const { data: blob } = await sb.storage.from(DRAWINGS_BUCKET).download(st.drawing.file_path);
+                if (notesState !== st) return;
+                st.html = blob ? await blob.text() : '';
+            }
+            const plan = await parsePlanData(st.html || '');
+            if (notesState !== st) return;
+            const root = plan && sanitizePlanSvg(plan.svg);
+            if (!root) { show('В этом листе нет плана, на котором можно рисовать замечания.'); return; }
+            const g = document.getElementById('notesPlan');
+            g.replaceChildren(...[...root.childNodes].map(n => document.importNode(n, true)));
+            st.plan = plan;
+            if (plan.viewBox) st.baseVb = plan.viewBox.slice();
+            else { const b = g.getBBox(); st.baseVb = [b.x, b.y, b.width, b.height]; }
+            st.vb = st.baseVb.slice();
+            show('');
+            const { data, error } = await sb.from('drawing_notes').select('*').eq('project_id', st.projectId).eq('sheet', st.sheet);
+            if (notesState !== st) return;
+            st.marks = (data || []).sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+            st.error = error ? 'Замечания пока не сохраняются: в базе нет таблицы drawing_notes (supabase/drawing_notes.sql).' : '';
+        }
+
+        // ---- вид: масштаб и сдвиг ----
+        function notesApplyViewBox() {
+            document.getElementById('notesSvg').setAttribute('viewBox', notesState.vb.join(' '));
+            notesRenderMarks();
+        }
+        function notesUnitsPerPx() {
+            const svg = document.getElementById('notesSvg'), v = notesState.vb;
+            return Math.max(v[2] / (svg.clientWidth || 1), v[3] / (svg.clientHeight || 1));
+        }
+        function notesToPlan(cx, cy) {
+            const svg = document.getElementById('notesSvg'), pt = svg.createSVGPoint();
+            pt.x = cx; pt.y = cy;
+            const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+            return [Math.round(p.x * 1000) / 1000, Math.round(p.y * 1000) / 1000];
+        }
+        function notesZoomAt([px, py], factor, base) {
+            const st = notesState, b = base || st.vb;
+            const w = Math.min(st.baseVb[2] * 3, Math.max(st.baseVb[2] / 400, b[2] * factor)), f = w / b[2];
+            st.vb = [px - (px - b[0]) * f, py - (py - b[1]) * f, b[2] * f, b[3] * f];
+            notesApplyViewBox();
+        }
+        function notesZoomButton(f) { const v = notesState?.vb; if (v) notesZoomAt([v[0] + v[2] / 2, v[1] + v[3] / 2], f); }
+        function notesFit() { if (notesState?.baseVb) { notesState.vb = notesState.baseVb.slice(); notesApplyViewBox(); } }
+
+        // ---- фигуры ----
+        // k — единиц чертежа в пикселе: толщина линий и наконечник стрелки одинаковые на экране при любом масштабе.
+        function noteShapeSvg(m, k, selected) {
+            const c = escapeHtml(m.color || NOTE_COLORS[0]), d = m.data || {}, sw = (selected ? 4.5 : 3) * k;
+            const common = `fill="none" stroke="${c}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"`;
+            const op = m.resolved ? ' opacity="0.4"' : '';
+            const id = m.id ? ` data-note="${escapeHtml(m.id)}"` : '';
+            let body = '';
+            if (m.kind === 'rect') body = `<rect x="${d.x}" y="${d.y}" width="${d.w}" height="${d.h}" ${common}/>`;
+            else if (m.kind === 'ellipse') body = `<ellipse cx="${d.x + d.w / 2}" cy="${d.y + d.h / 2}" rx="${Math.abs(d.w / 2)}" ry="${Math.abs(d.h / 2)}" ${common}/>`;
+            else if (m.kind === 'pen') body = `<polyline points="${(d.pts || []).map(p => p.join(',')).join(' ')}" ${common}/>`;
+            else if (m.kind === 'arrow' && d.pts?.length === 2) {
+                const [[x1, y1], [x2, y2]] = d.pts, a = Math.atan2(y2 - y1, x2 - x1), h = 16 * k;
+                const hp = s => `${x2 - h * Math.cos(a + s)},${y2 - h * Math.sin(a + s)}`;
+                body = `<path d="M${x1},${y1}L${x2},${y2}M${hp(0.45)}L${x2},${y2}L${hp(-0.45)}" ${common}/>`;
+            } else if (m.kind === 'text') {
+                body = `<text x="${d.x}" y="${d.y}" font-size="${d.size}" font-family="Inter, Arial, sans-serif" font-weight="700" fill="${c}" stroke="#fff" stroke-width="${d.size * 0.18}" paint-order="stroke" dominant-baseline="middle">${escapeHtml(m.text || '')}</text>`;
+            }
+            // Подпись к фигуре — рядом с ней, тем же цветом.
+            if (m.kind !== 'text' && m.text) {
+                const b = noteBounds(m), fs = 14 * k;
+                body += `<text x="${b[0]}" y="${b[1] - fs * 0.7}" font-size="${fs}" font-family="Inter, Arial, sans-serif" font-weight="600" fill="${c}" stroke="#fff" stroke-width="${fs * 0.2}" paint-order="stroke">${escapeHtml(m.text)}</text>`;
+            }
+            // Широкая невидимая обводка, чтобы по тонкой линии легко попасть пальцем.
+            const hit = m.kind === 'text' ? '' : body.replace(/stroke="[^"]*" stroke-width="[^"]*"/, `stroke="transparent" stroke-width="${16 * k}"`).replace(/<text[\s\S]*$/, '');
+            return `<g class="note"${id}${op} style="cursor:pointer">${hit}${body}</g>`;
+        }
+        function noteBounds(m) {
+            const d = m.data || {};
+            if (m.kind === 'rect' || m.kind === 'ellipse') return [Math.min(d.x, d.x + d.w), Math.min(d.y, d.y + d.h), Math.max(d.x, d.x + d.w), Math.max(d.y, d.y + d.h)];
+            if (m.kind === 'text') { const w = (m.text || '').length * d.size * 0.6; return [d.x, d.y - d.size / 2, d.x + w, d.y + d.size / 2]; }
+            const xs = (d.pts || []).map(p => p[0]), ys = (d.pts || []).map(p => p[1]);
+            return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+        }
+        function notesRenderMarks() {
+            const st = notesState;
+            if (!st?.vb) return;
+            const k = notesUnitsPerPx();
+            document.getElementById('notesMarks').innerHTML = st.marks.map(m => noteShapeSvg(m, k, m.id === st.selected)).join('');
+            document.getElementById('notesDraft').innerHTML = st.draft ? noteShapeSvg(st.draft, k) : '';
+        }
+
+        function notesRender() {
+            const st = notesState;
+            if (!st) return;
+            const svg = document.getElementById('notesSvg');
+            svg.style.cursor = st.tool === 'pan' ? 'grab' : 'crosshair';
+            document.getElementById('notesToolbar').innerHTML = `
+                ${NOTE_TOOLS.map(([t, ic, title]) => `<button onclick="notesSetTool('${t}')" title="${title}" data-tool="${t}" class="w-9 h-9 flex-shrink-0 rounded-lg ${st.tool === t ? 'bg-brand-600 text-white' : 'text-slate-700 hover:bg-slate-200'}"><i class="fa-solid ${ic}"></i></button>`).join('')}
+                <span class="w-px h-6 bg-slate-300 mx-1 flex-shrink-0"></span>
+                ${NOTE_COLORS.map(c => `<button onclick="notesSetColor('${c}')" title="Цвет" data-color="${c}" class="w-7 h-7 flex-shrink-0 rounded-full border-2 ${st.color === c ? 'border-slate-900 scale-110' : 'border-white'}" style="background:${c}"></button>`).join('')}
+                <span class="w-px h-6 bg-slate-300 mx-1 flex-shrink-0"></span>
+                <button onclick="notesUndo()" title="Отменить мою последнюю пометку" class="w-9 h-9 flex-shrink-0 rounded-lg text-slate-700 hover:bg-slate-200"><i class="fa-solid fa-rotate-left"></i></button>
+                <button onclick="notesExportJpeg()" title="Скачать картинкой (JPEG)" class="h-9 px-3 flex-shrink-0 rounded-lg text-slate-700 hover:bg-slate-200 text-sm font-semibold whitespace-nowrap"><i class="fa-solid fa-image mr-1"></i>JPEG</button>`;
+            if (st.vb) notesApplyViewBox();
+            notesRenderList();
+        }
+        function notesSetTool(t) { notesState.tool = t; notesRender(); }
+        function notesSetColor(c) {
+            const st = notesState, m = st.marks.find(x => x.id === st.selected);
+            st.color = c;
+            if (m && notesCanEdit(m)) notesUpdate(m, { color: c });
+            notesRender();
+        }
+
+        function notesRenderList() {
+            const st = notesState, el = document.getElementById('notesList');
+            const kindName = { rect: 'Прямоугольник', ellipse: 'Круг', arrow: 'Стрелка', pen: 'Линия', text: 'Подпись' };
+            const open = st.marks.filter(m => !m.resolved).length;
+            el.innerHTML = `
+                <div class="flex items-center justify-between mb-2">
+                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide">Замечания: ${st.marks.length}${st.marks.length ? `, открытых ${open}` : ''}</h4>
+                </div>
+                ${st.error ? `<div class="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mb-2">${escapeHtml(st.error)}</div>` : ''}
+                ${st.marks.length ? '' : '<div class="text-sm text-slate-400">Выберите инструмент сверху и нарисуйте на плане. Пометку видят все участники проекта.</div>'}
+                <div class="space-y-1.5">${st.marks.slice().reverse().map(m => {
+                    const sel = m.id === st.selected, mine = notesCanEdit(m);
+                    return `<div data-note-row="${escapeHtml(m.id)}" class="border rounded-lg p-2 text-sm ${sel ? 'border-brand-500 bg-brand-50' : 'border-slate-200'} ${m.resolved ? 'opacity-60' : ''}">
+                        <button onclick="notesSelect('${escapeHtml(m.id)}', true)" class="w-full text-left flex items-start gap-2">
+                            <span class="w-3 h-3 rounded-full mt-1 flex-shrink-0" style="background:${escapeHtml(m.color)}"></span>
+                            <span class="min-w-0 flex-1"><span class="font-semibold text-slate-800">${m.resolved ? '✓ ' : ''}${escapeHtml(m.text || kindName[m.kind] || 'Пометка')}</span>
+                            <span class="block text-[11px] text-slate-400">${escapeHtml(m.author_name || '')} · ${m.created_at ? new Date(m.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</span></span>
+                        </button>
+                        ${sel ? `<div class="mt-2 space-y-2">
+                            ${m.author_id === notesMyId() ? `<input id="noteTextInput" value="${escapeHtml(m.text || '')}" placeholder="${m.kind === 'text' ? 'Текст подписи' : 'Комментарий к пометке'}" onchange="notesSetText('${escapeHtml(m.id)}', this.value)" class="w-full px-2 py-1.5 border border-slate-300 rounded text-sm">` : ''}
+                            <div class="flex gap-2">
+                                ${mine ? `<button onclick="notesToggleResolved('${escapeHtml(m.id)}')" class="flex-1 text-xs font-semibold px-2 py-1.5 rounded border ${m.resolved ? 'border-slate-300 text-slate-600' : 'border-emerald-300 text-emerald-700 bg-emerald-50'}">${m.resolved ? 'Вернуть в работу' : 'Исправлено'}</button>
+                                <button onclick="notesDelete('${escapeHtml(m.id)}')" class="text-xs font-semibold px-2 py-1.5 rounded border border-rose-200 text-rose-600">Удалить</button>` : '<span class="text-[11px] text-slate-400">Изменить может автор или ответственный за чертежи.</span>'}
+                            </div></div>` : ''}
+                    </div>`;
+                }).join('')}</div>`;
+        }
+        function notesSelect(id, zoom) {
+            const st = notesState;
+            st.selected = st.selected === id && !zoom ? null : id;
+            const m = st.marks.find(x => x.id === id);
+            if (zoom && m) {
+                const [x0, y0, x1, y1] = noteBounds(m), w = Math.max(x1 - x0, st.baseVb[2] / 25) * 2.2, r = st.vb[3] / st.vb[2];
+                st.vb = [(x0 + x1) / 2 - w / 2, (y0 + y1) / 2 - w * r / 2, w, w * r];
+            }
+            notesRender();
+        }
+
+        // ---- сохранение ----
+        async function notesAdd(mark) {
+            const st = notesState;
+            const row = { project_id: st.projectId, sheet: st.sheet, drawing_id: st.drawing.id, author_id: notesMyId(),
+                author_name: currentUserProfile?.full_name || currentUserProfile?.email || '', kind: mark.kind, color: mark.color, data: mark.data, text: mark.text || null, resolved: false };
+            const local = { ...row, id: 'tmp-' + Date.now(), created_at: new Date().toISOString() };
+            st.marks.push(local);
+            st.selected = local.id;
+            notesRender();
+            const { data, error } = await sb.from('drawing_notes').insert(row).select().single();
+            const saved = Array.isArray(data) ? data[0] : data;
+            if (error || !saved) { st.error = 'Не удалось сохранить пометку: ' + (error?.message || 'нет ответа базы'); notesRender(); return; }
+            Object.assign(local, saved);
+            if (st.selected?.startsWith?.('tmp-')) st.selected = local.id;
+            notesRender();
+            if (mark.kind !== 'text') document.getElementById('noteTextInput')?.focus();
+        }
+        async function notesUpdate(m, patch) {
+            Object.assign(m, patch);
+            notesRender();
+            const { error } = await sb.from('drawing_notes').update(patch).eq('id', m.id);
+            if (error) { notesState.error = 'Не удалось сохранить: ' + error.message; notesRender(); }
+        }
+        function notesSetText(id, v) { const m = notesState.marks.find(x => x.id === id); if (m) notesUpdate(m, { text: v.trim() || null }); }
+        function notesToggleResolved(id) { const m = notesState.marks.find(x => x.id === id); if (notesCanEdit(m)) notesUpdate(m, { resolved: !m.resolved }); }
+        async function notesDelete(id, ask = true) {
+            const st = notesState, m = st.marks.find(x => x.id === id);
+            if (!notesCanEdit(m) || (ask && !confirm('Удалить пометку?'))) return;
+            st.marks = st.marks.filter(x => x !== m);
+            if (st.selected === id) st.selected = null;
+            notesRender();
+            const { error } = await sb.from('drawing_notes').delete().eq('id', id);
+            if (error) { st.error = 'Не удалось удалить: ' + error.message; st.marks.push(m); notesRender(); }
+        }
+        function notesUndo() {
+            const mine = notesState?.marks.filter(m => m.author_id === notesMyId());
+            if (mine?.length) notesDelete(mine[mine.length - 1].id, false);
+        }
+
+        // ---- мышь и пальцы ----
+        function initNotesPointer() {
+            const svg = document.getElementById('notesSvg');
+            const pointers = new Map();
+            let g = null;
+            svg.addEventListener('pointerdown', e => {
+                const st = notesState;
+                if (!st?.vb) return;
+                svg.setPointerCapture(e.pointerId);
+                pointers.set(e.pointerId, [e.clientX, e.clientY]);
+                if (pointers.size === 2) {
+                    st.draft = null;
+                    const [a, b] = [...pointers.values()];
+                    g = { type: 'pinch', dist: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, vb: st.vb.slice(), center: notesToPlan((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) };
+                    notesRenderMarks();
+                    return;
+                }
+                const p = notesToPlan(e.clientX, e.clientY);
+                if (st.tool === 'pan' || st.tool === 'text') g = { type: 'pan', start: [e.clientX, e.clientY], vb: st.vb.slice(), moved: false };
+                else {
+                    g = { type: 'draw', start: p, startPx: [e.clientX, e.clientY] };
+                    st.draft = { kind: st.tool, color: st.color, data: st.tool === 'pen' ? { pts: [p] } : st.tool === 'arrow' ? { pts: [p, p] } : { x: p[0], y: p[1], w: 0, h: 0 } };
+                }
+            });
+            svg.addEventListener('pointermove', e => {
+                const st = notesState;
+                if (!g || !pointers.has(e.pointerId)) return;
+                pointers.set(e.pointerId, [e.clientX, e.clientY]);
+                if (g.type === 'pan') {
+                    const dx = e.clientX - g.start[0], dy = e.clientY - g.start[1];
+                    if (!g.moved && Math.hypot(dx, dy) < 5) return;
+                    g.moved = true;
+                    const k = Math.max(g.vb[2] / (svg.clientWidth || 1), g.vb[3] / (svg.clientHeight || 1));
+                    st.vb = [g.vb[0] - dx * k, g.vb[1] - dy * k, g.vb[2], g.vb[3]];
+                    notesApplyViewBox();
+                } else if (g.type === 'pinch' && pointers.size === 2) {
+                    const [a, b] = [...pointers.values()];
+                    notesZoomAt(g.center, g.dist / (Math.hypot(a[0] - b[0], a[1] - b[1]) || 1), g.vb);
+                } else if (g.type === 'draw' && st.draft) {
+                    const p = notesToPlan(e.clientX, e.clientY), d = st.draft.data;
+                    if (st.draft.kind === 'pen') { const l = d.pts[d.pts.length - 1]; if (Math.hypot(p[0] - l[0], p[1] - l[1]) > 2 * notesUnitsPerPx()) d.pts.push(p); }
+                    else if (st.draft.kind === 'arrow') d.pts[1] = p;
+                    else { d.w = p[0] - g.start[0]; d.h = p[1] - g.start[1]; }
+                    notesRenderMarks();
+                }
+            });
+            const up = e => {
+                const st = notesState;
+                if (!pointers.has(e.pointerId)) return;
+                pointers.delete(e.pointerId);
+                const done = e.type === 'pointerup';
+                if (g?.type === 'draw' && st?.draft && pointers.size === 0) {
+                    const dr = st.draft;
+                    st.draft = null;
+                    const big = Math.hypot(e.clientX - g.startPx[0], e.clientY - g.startPx[1]) >= 6;
+                    if (done && big) {
+                        if (dr.kind === 'rect' || dr.kind === 'ellipse') {
+                            const d = dr.data;
+                            dr.data = { x: Math.min(d.x, d.x + d.w), y: Math.min(d.y, d.y + d.h), w: Math.abs(d.w), h: Math.abs(d.h) };
+                        }
+                        notesAdd(dr);
+                    } else { notesRenderMarks(); if (done) notesPickAt(e); }
+                } else if (g?.type === 'pan' && !g.moved && done && pointers.size === 0) {
+                    if (st.tool === 'text') notesAddText(e); else notesPickAt(e);
+                }
+                if (pointers.size === 0) g = null;
+                else if (g?.type === 'pinch') g = { type: 'pan', start: [...pointers.values()][0], vb: st.vb.slice(), moved: true };
+            };
+            svg.addEventListener('pointerup', up);
+            svg.addEventListener('pointercancel', up);
+            svg.addEventListener('wheel', e => {
+                if (!notesState?.vb) return;
+                e.preventDefault();
+                notesZoomAt(notesToPlan(e.clientX, e.clientY), e.deltaY > 0 ? 1.2 : 1 / 1.2);
+            }, { passive: false });
+        }
+        function notesPickAt(e) {
+            const el = document.elementsFromPoint(e.clientX, e.clientY).find(x => x.closest?.('[data-note]'));
+            const id = el?.closest('[data-note]')?.dataset.note || null;
+            notesState.selected = id === notesState.selected ? null : id;
+            notesRender();
+        }
+        function notesAddText(e) {
+            const text = (prompt('Текст подписи') || '').trim();
+            if (!text) return;
+            const p = notesToPlan(e.clientX, e.clientY);
+            notesAdd({ kind: 'text', color: notesState.color, text, data: { x: p[0], y: p[1], size: Math.round(18 * notesUnitsPerPx() * 1000) / 1000 } });
+        }
+
+        // ---- картинкой (JPEG): то, что сейчас видно на экране, с пометками и подписью внизу ----
+        async function notesBuildJpeg() {
+            const st = notesState, svgEl = document.getElementById('notesSvg');
+            const vb = st.vb, W = 1800, H = Math.round(W * vb[3] / vb[2]), foot = 56, k = vb[2] / W;
+            const style = `.st[stroke],.ln{fill:none;stroke-width:${0.8 * k}px}.ld .ln{stroke-width:${0.9 * k}px}.hb{fill:#fff;fill-opacity:.75;stroke:none}`;
+            const marks = st.marks.map(m => noteShapeSvg(m, k * 1.4, false)).join('');
+            const src = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="${vb.join(' ')}"><style>${style}</style><rect x="${vb[0]}" y="${vb[1]}" width="${vb[2]}" height="${vb[3]}" fill="#fff"/>${document.getElementById('notesPlan').innerHTML}${marks}</svg>`;
+            const url = URL.createObjectURL(new Blob([src], { type: 'image/svg+xml' }));
+            try {
+                const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Не удалось нарисовать план')); i.src = url; });
+                const c = document.createElement('canvas');
+                c.width = W; c.height = H + foot;
+                const x = c.getContext('2d');
+                x.fillStyle = '#fff'; x.fillRect(0, 0, W, H + foot);
+                x.drawImage(img, 0, 0, W, H);
+                x.fillStyle = '#0f172a'; x.fillRect(0, H, W, foot);
+                x.fillStyle = '#fff'; x.font = '600 24px Inter, Arial, sans-serif'; x.textBaseline = 'middle';
+                const who = currentUserProfile?.full_name || currentUserProfile?.email || '';
+                x.fillText(`${st.drawing.sheet} · замечания · ${new Date().toLocaleDateString('ru-RU')}${who ? ' · ' + who : ''}`, 20, H + foot / 2);
+                return await new Promise(res => c.toBlob(res, 'image/jpeg', 0.9));
+            } finally { URL.revokeObjectURL(url); }
+        }
+        async function notesExportJpeg() {
+            if (!notesState?.vb) return;
+            let blob;
+            try { blob = await notesBuildJpeg(); } catch (e) { alert(e.message); return; }
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `Замечания - ${notesState.drawing.sheet.replace(/[\\/:*?"<>|]/g, ' ')}.jpg`;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 2000);
         }
 
         // Водяной знак с почтой зрителя и датой: по снимку экрана видно, чей это просмотр.

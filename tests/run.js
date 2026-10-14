@@ -381,6 +381,115 @@ const PLANZ="${planz}";</script>`;
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
+// Открыть лист в просмотре и включить «Замечания». user — кто вошёл.
+async function openNotes(page, user = { id: 'u1', full_name: 'Грег' }) {
+    await page.evaluate(async u => {
+        currentUserProfile = u;
+        appData.drawings = __db.drawings.map(d => ({ ...d }));
+        await openDrawingViewer('d1');
+        await toggleDrawingNotes();
+    }, user);
+    await page.waitForFunction(() => notesState?.vb, null, { timeout: 15000 });
+}
+const notesToScreen = (page, x, y) => page.evaluate(([x, y]) => {
+    const svg = document.getElementById('notesSvg'), pt = svg.createSVGPoint();
+    pt.x = x; pt.y = y;
+    const r = pt.matrixTransform(svg.getScreenCTM());
+    return [r.x, r.y];
+}, [x, y]);
+async function notesDrag(page, from, to) {
+    const [ax, ay] = await notesToScreen(page, ...from), [bx, by] = await notesToScreen(page, ...to);
+    await page.mouse.move(ax, ay); await page.mouse.down();
+    await page.mouse.move((ax + bx) / 2, (ay + by) / 2); await page.mouse.move(bx, by); await page.mouse.up();
+}
+
+test('Замечания: рисую прямоугольник и стрелку с подписью — сохраняется и видно после повторного открытия', async () => {
+    const page = await openApp();
+    await openNotes(page);
+    const vb = await page.evaluate(() => notesState.vb);
+    const P = (fx, fy) => [vb[0] + vb[2] * fx, vb[1] + vb[3] * fy];
+    // Линии чертежа рисуются линиями, а не залитыми чёрным фигурами.
+    const fill = await page.evaluate(() => { const el = document.querySelector('#notesPlan .st[stroke], #notesPlan .ln'); return el ? getComputedStyle(el).fill : 'none'; });
+    expect(fill === 'none', 'линии чертежа залиты: ' + fill);
+    await page.click('#notesToolbar [data-tool="rect"]');
+    await page.click('#notesToolbar [data-color="#2563eb"]');
+    await notesDrag(page, P(0.3, 0.3), P(0.5, 0.45));
+    await page.waitForFunction(() => __db.drawing_notes?.length === 1);
+    await page.fill('#noteTextInput', 'Переложить плитку');
+    await page.press('#noteTextInput', 'Enter');
+    await page.click('#notesToolbar [data-tool="arrow"]');
+    await notesDrag(page, P(0.7, 0.7), P(0.55, 0.5));
+    await page.waitForFunction(() => __db.drawing_notes?.length === 2);
+    const rows = await page.evaluate(() => __db.drawing_notes.map(r => ({ kind: r.kind, color: r.color, text: r.text, sheet: r.sheet, project: r.project_id, author: r.author_id, data: r.data })));
+    const rect = rows.find(r => r.kind === 'rect');
+    expect(rect && rect.color === '#2563eb' && rect.text === 'Переложить плитку' && rect.project === 'p1' && rect.author === 'u1' && rect.sheet === 'лист 1 тестовый посадочный план',
+        'прямоугольник сохранён неверно: ' + JSON.stringify(rect));
+    expect(near(rect.data.x, P(0.3, 0)[0], vb[2] * 0.01) && near(rect.data.w, vb[2] * 0.2, vb[2] * 0.01), 'координаты прямоугольника не в единицах чертежа: ' + JSON.stringify(rect.data));
+    expect(rows.some(r => r.kind === 'arrow' && r.data.pts.length === 2), 'стрелка не сохранилась');
+    // Закрыли и открыли заново — пометки на месте.
+    await page.evaluate(() => closeDrawingViewer());
+    await openNotes(page);
+    const shown = await page.evaluate(() => document.querySelectorAll('#notesMarks [data-note]').length);
+    expect(shown === 2, 'после повторного открытия видно пометок: ' + shown);
+    expect(/Переложить плитку/.test(await page.$eval('#notesList', el => el.innerText)), 'в списке нет подписи замечания');
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
+test('Замечания: чужую пометку удаляет только ответственный за чертежи, «Исправлено» отмечается', async () => {
+    const add = page => page.evaluate(() => __db.drawing_notes = [
+        { id: 'n1', project_id: 'p1', sheet: 'лист 1 тестовый посадочный план', author_id: 'u2', author_name: 'Прораб', kind: 'rect', color: '#dc2626', data: { x: 0, y: 0, w: 5, h: 5 }, text: 'Бордюр', resolved: false, created_at: '2026-10-14T05:00:00Z' }]);
+    const worker = await openApp();
+    await add(worker);
+    await openNotes(worker, { id: 'u3', full_name: 'Мастер' });
+    await worker.evaluate(() => notesSelect('n1', true));
+    const btns = await worker.$$eval('[data-note-row="n1"] button', b => b.map(x => x.innerText.trim()));
+    expect(!btns.includes('Удалить') && !btns.includes('Исправлено'), 'не ответственный может менять чужую пометку: ' + JSON.stringify(btns));
+    const admin = await openApp({ admin: true });
+    await add(admin);
+    await openNotes(admin);
+    await admin.evaluate(() => notesSelect('n1', true));
+    await admin.click('[data-note-row="n1"] >> text=Исправлено');
+    expect(await admin.evaluate(() => __db.drawing_notes[0].resolved === true), '«Исправлено» не сохранилось');
+    admin.once('dialog', d => d.accept());
+    await admin.click('[data-note-row="n1"] >> text=Удалить');
+    await admin.waitForFunction(() => __db.drawing_notes.length === 0);
+    expect(!admin.errors.length && !worker.errors.length, 'ошибки на странице: ' + admin.errors.concat(worker.errors).join('; '));
+});
+
+test('Замечания: скачать картинкой — JPEG с планом и пометками', async () => {
+    const page = await openApp();
+    await openNotes(page);
+    const vb = await page.evaluate(() => notesState.vb);
+    await page.click('#notesToolbar [data-tool="ellipse"]');
+    await notesDrag(page, [vb[0] + vb[2] * 0.4, vb[1] + vb[3] * 0.4], [vb[0] + vb[2] * 0.6, vb[1] + vb[3] * 0.6]);
+    await page.waitForFunction(() => __db.drawing_notes?.length === 1);
+    // Имя файла запоминаем при нажатии ссылки: безголовый Chromium в тестах не передаёт русские имена скачиваний.
+    await page.evaluate(() => { const c = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { window.__dlName = this.download; return c.call(this); }; });
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#notesToolbar >> text=JPEG')]);
+    const file = await dl.path();
+    const buf = fs.readFileSync(file);
+    const name = await page.evaluate(() => window.__dlName);
+    expect(/\.jpg$/.test(name) && /Лист 1/.test(name), 'имя файла: ' + name);
+    expect(buf[0] === 0xff && buf[1] === 0xd8 && buf.length > 20000, `это не JPEG или он пустой: ${buf.length} байт`);
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
+test('Замечания на телефоне: рисуется пальцем, список под планом', async () => {
+    const page = await openApp({ width: 390, height: 800 });
+    await openNotes(page);
+    const box = await page.$eval('#notesSvg', el => { const r = el.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; });
+    expect(box[2] > 300 && box[3] > 250, 'план на телефоне слишком маленький: ' + JSON.stringify(box));
+    const listTop = await page.$eval('#notesList', el => el.getBoundingClientRect().top);
+    expect(listTop >= box[1] + box[3] - 1, 'список замечаний налезает на план');
+    const scrollW = await page.evaluate(() => document.documentElement.scrollWidth);
+    expect(scrollW <= 390, 'страница шире экрана: ' + scrollW);
+    await page.click('#notesToolbar [data-tool="pen"]');
+    const vb = await page.evaluate(() => notesState.vb);
+    await notesDrag(page, [vb[0] + vb[2] * 0.3, vb[1] + vb[3] * 0.5], [vb[0] + vb[2] * 0.6, vb[1] + vb[3] * 0.55]);
+    await page.waitForFunction(() => __db.drawing_notes?.length === 1 && __db.drawing_notes[0].kind === 'pen');
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
 test('По зонам работает на телефоне', async () => {
     const page = await openApp({ width: 390, height: 800 });
     await openZones(page);
