@@ -435,6 +435,55 @@ test('Замечания: рисую прямоугольник и стрелк�
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
+test('Замечания: выделяю нарисованное — двигаю, растягиваю, тяну конец стрелки, меняю размер подписи', async () => {
+    const page = await openApp();
+    await openNotes(page);
+    const vb = await page.evaluate(() => notesState.vb);
+    const P = (fx, fy) => [vb[0] + vb[2] * fx, vb[1] + vb[3] * fy];
+    const W = vb[2], tol = W * 0.01;
+    const note = kind => page.evaluate(k => JSON.parse(JSON.stringify(__db.drawing_notes.find(n => n.kind === k))), kind);
+    // Прямоугольник: сдвиг за середину и растяжение за правый нижний угол.
+    await page.click('#notesToolbar [data-tool="rect"]');
+    await notesDrag(page, P(0.2, 0.2), P(0.4, 0.4));
+    await page.waitForFunction(() => __db.drawing_notes.length === 1);
+    await page.click('#notesToolbar [data-tool="pan"]');
+    const r0 = await note('rect');
+    await notesDrag(page, P(0.3, 0.3), P(0.35, 0.3));
+    let r = await note('rect');
+    expect(near(r.data.x, r0.data.x + W * 0.05, tol) && near(r.data.w, r0.data.w, tol), 'прямоугольник не сдвинулся: ' + JSON.stringify([r0.data, r.data]));
+    await notesDrag(page, [r.data.x + r.data.w, r.data.y + r.data.h], [r.data.x + r.data.w + W * 0.1, r.data.y + r.data.h]);
+    const r2 = await note('rect');
+    expect(near(r2.data.w, r.data.w + W * 0.1, tol) && near(r2.data.x, r.data.x, tol), 'прямоугольник не растянулся: ' + JSON.stringify([r.data, r2.data]));
+    // Стрелка: тяну её конец.
+    await page.click('#notesToolbar [data-tool="arrow"]');
+    await notesDrag(page, P(0.6, 0.6), P(0.7, 0.7));
+    await page.waitForFunction(() => __db.drawing_notes.length === 2);
+    await page.click('#notesToolbar [data-tool="pan"]');
+    const a0 = await note('arrow');
+    await notesDrag(page, a0.data.pts[1], P(0.8, 0.65));
+    const a = await note('arrow');
+    expect(near(a.data.pts[1][0], P(0.8, 0)[0], tol) && near(a.data.pts[0][0], a0.data.pts[0][0], tol), 'конец стрелки не переместился: ' + JSON.stringify(a.data));
+    // Подпись: размер из списка, затем растягиваю за угол.
+    await page.selectOption('#notesFont', 'l');
+    page.once('dialog', d => d.accept('Проверить'));
+    await page.click('#notesToolbar [data-tool="text"]');
+    const [tx, ty] = await notesToScreen(page, ...P(0.3, 0.7));
+    await page.mouse.click(tx, ty);
+    await page.waitForFunction(() => __db.drawing_notes.length === 3);
+    const base = await page.evaluate(() => notesState.baseVb[2]);
+    let t = await note('text');
+    expect(near(t.data.size, base * 0.017, base * 0.0005), 'подпись не того размера: ' + t.data.size);
+    await page.click('#notesToolbar [data-tool="pan"]');
+    await page.selectOption('#notesFont', 's');
+    t = await note('text');
+    expect(near(t.data.size, base * 0.007, base * 0.0005), 'размер выделенной подписи не поменялся: ' + t.data.size);
+    const se = await page.evaluate(() => { const r = document.querySelector('#notesDraft [data-handle="se"]').getBBox(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+    await notesDrag(page, se, [se[0] + (se[0] - t.data.x), se[1]]);
+    const t2 = await note('text');
+    expect(t2.data.size > t.data.size * 1.6, 'подпись не увеличилась за угол: ' + t.data.size + ' → ' + t2.data.size);
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
 test('Замечания: чужую пометку удаляет только ответственный за чертежи, «Исправлено» отмечается', async () => {
     const add = page => page.evaluate(() => __db.drawing_notes = [
         { id: 'n1', project_id: 'p1', sheet: 'лист 1 тестовый посадочный план', author_id: 'u2', author_name: 'Прораб', kind: 'rect', color: '#dc2626', data: { x: 0, y: 0, w: 5, h: 5 }, text: 'Бордюр', resolved: false, created_at: '2026-10-14T05:00:00Z' }]);
