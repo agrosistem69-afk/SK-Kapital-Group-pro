@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '34';
+        window.APP_VERSION = '35';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=34">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=34">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=34">
+    <link rel="stylesheet" href="vendor/app.css?v=35">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=35">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=35">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=34" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=34" defer></script>
-    <script src="vendor/jszip.min.js?v=34" defer></script>
+    <script src="vendor/html2canvas.min.js?v=35" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=35" defer></script>
+    <script src="vendor/jszip.min.js?v=35" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=34"></script>
+    <script src="vendor/supabase.js?v=35"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -584,7 +584,7 @@
                 <select id="taskDeskSelect" onchange="setTaskDesk(this.value)" class="bg-white border border-slate-300 rounded-lg text-sm px-3 py-2 max-w-full focus:outline-none focus:ring-2 focus:ring-brand-500"></select>
             </div>
             <div id="taskDeskBanner" class="hidden items-center justify-between gap-3 mb-3 bg-amber-50 border border-amber-200 text-amber-900 text-sm rounded-xl px-4 py-2.5 flex-wrap">
-                <span><i class="fa-solid fa-eye mr-1.5"></i>Вы в списке работ: <b id="taskDeskBannerName"></b>. Новые работы попадут к нему.</span>
+                <span><i class="fa-solid fa-eye mr-1.5"></i>Вы в списке работ: <b id="taskDeskBannerName"></b>. <span id="taskDeskBannerNote"></span></span>
                 <button onclick="setTaskDesk('')" class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white border border-amber-300 hover:bg-amber-100">Вернуться к своему</button>
             </div>
 
@@ -912,6 +912,7 @@
             </div>
             <form id="taskForm" onsubmit="saveTask(event)" class="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
                 <input type="hidden" id="taskId">
+                <p id="taskAssignmentHint" class="hidden text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"></p>
                 <div>
                     <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Наименование работы *</label>
                     <input type="text" id="taskTitle" required placeholder="Например: Монтаж электропроводки" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none">
@@ -2365,11 +2366,24 @@
         function defaultTaskDesk() {
             return ['worker', 'lead'].includes(currentUserRole) ? (currentUserProfile?.id || null) : null;
         }
+        // Человек связан с записью в «Сотрудниках» (profiles.worker_id): работы чужих списков, где он исполнитель,
+        // тоже попадают к нему — это задания. В них он меняет всё, кроме сроков и исполнителя, и не закрывает:
+        // закрывает автор задания (руководитель — после проверки факта).
+        function deskWorkerId(ownerId) {
+            if (!ownerId) return null;
+            if (ownerId === currentUserProfile?.id) return currentUserProfile?.worker_id || null;
+            return (appData.people || []).find(p => p.id === ownerId)?.worker_id || null;
+        }
         function applyTaskDesk() {
             if (appData.taskDesk === undefined || currentUserRole !== 'manager') appData.taskDesk = defaultTaskDesk();
-            const all = appData.allTasks || [];
-            appData.tasks = appData.taskOwners ? all.filter(t => (t.ownerId || null) === appData.taskDesk) : all.slice();
+            const all = appData.allTasks || [], desk = appData.taskDesk, wid = deskWorkerId(desk);
+            appData.tasks = appData.taskOwners
+                ? all.filter(t => (t.ownerId || null) === desk || (wid && t.workerId === wid && t.ownerId !== desk))
+                : all.slice();
         }
+        // Задание из чужого списка: сроки, исполнитель, закрытие и удаление — только у автора (и у руководителя).
+        const taskIsAssignment = t => !!(appData.taskOwners && t && currentUserRole !== 'manager' && (t.ownerId || null) !== (currentUserProfile?.id || null));
+        const taskOwnerLabel = t => (!t.ownerId ? 'руководителя' : ((appData.people || []).find(p => p.id === t.ownerId)?.full_name || 'другого списка'));
         function setTaskDesk(ownerId) {
             appData.taskDesk = ownerId || null;
             applyTaskDesk();
@@ -2395,7 +2409,12 @@
             const who = people.find(p => p.id === appData.taskDesk);
             banner.classList.toggle('hidden', !who);
             banner.classList.toggle('flex', !!who);
-            if (who) document.getElementById('taskDeskBannerName').textContent = `${who.full_name || who.email} · ${profileRoleLabel(who)}`;
+            if (who) {
+                document.getElementById('taskDeskBannerName').textContent = `${who.full_name || who.email} · ${profileRoleLabel(who)}`;
+                document.getElementById('taskDeskBannerNote').textContent = who.worker_id
+                    ? 'Новая работа здесь — ваше задание ему: сроки и закрытие остаются за вами.'
+                    : 'Новые работы попадут в его список. Чтобы давать ему задания, свяжите его с сотрудником в «Пользователи и роли».';
+            }
         }
 
         async function refreshAllData() {
@@ -2977,6 +2996,7 @@
         }
 
         function renderTaskRowHtml(task, canEditTasks, groupKeyAttr) {
+            const assignment = taskIsAssignment(task);
             const worker = appData.workers.find(w => w.id === task.workerId);
             const workerName = worker ? worker.name : 'Не назначен';
             const today = new Date().toISOString().split('T')[0];
@@ -2992,7 +3012,7 @@
                 default: statusBadge = `<span class="bg-slate-100 text-slate-700 text-[10px] font-semibold px-2 py-0.5 rounded-full inline-flex items-center gap-1"><i class="fa-regular fa-clock text-slate-500"></i>Новая</span>`;
             }
 
-            const dragAttrs = canEditTasks
+            const dragAttrs = canEditTasks && !assignment
                 ? `draggable="true" data-task-id="${task.id}" data-group-key="${groupKeyAttr}" ondragstart="handleTaskDragStart(event)" ondragend="handleTaskDragEnd(event)" ondragover="handleRowDragOver(event)" ondragleave="handleRowDragLeave(event)" ondrop="handleRowDrop(event)"`
                 : '';
 
@@ -3003,19 +3023,22 @@
             const actionButtons = canEditTasks ? `
                 <div class="flex items-center gap-0.5 flex-shrink-0">
                     <button onclick="event.stopPropagation(); editTask('${task.id}')" class="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-slate-100 rounded-lg transition-colors" title="Редактировать"><i class="fa-solid fa-pen text-xs"></i></button>
-                    ${['manager','lead'].includes(currentUserRole) ? `<button onclick="event.stopPropagation(); deleteTask('${task.id}')" class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded-lg transition-colors" title="Удалить"><i class="fa-solid fa-trash-can text-xs"></i></button>` : ''}
+                    ${['manager','lead'].includes(currentUserRole) && !assignment ? `<button onclick="event.stopPropagation(); deleteTask('${task.id}')" class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded-lg transition-colors" title="Удалить"><i class="fa-solid fa-trash-can text-xs"></i></button>` : ''}
                 </div>
             ` : '';
 
-            const checkboxRight = canEditTasks
+            const checkboxRight = canEditTasks && !assignment
                 ? `<button onclick="event.stopPropagation(); toggleTaskStruck('${task.id}')" class="flex-shrink-0 mt-0.5 w-6 h-6 rounded-md border-2 flex items-center justify-center transition-colors ${task.struck ? 'bg-[#7cb342] border-[#7cb342]' : 'bg-white border-slate-300 hover:border-[#7cb342]'}" title="Отметить работу как выполненную">${task.struck ? '<i class="fa-solid fa-check text-white text-[11px]"></i>' : ''}</button>`
                 : (task.struck
                     ? `<span class="flex-shrink-0 mt-0.5 w-6 h-6 rounded-md bg-[#7cb342] flex items-center justify-center"><i class="fa-solid fa-check text-white text-[11px]"></i></span>`
-                    : `<span class="flex-shrink-0 mt-0.5 w-6 h-6 rounded-md border-2 border-slate-200"></span>`);
+                    : `<span class="flex-shrink-0 mt-0.5 w-6 h-6 rounded-md border-2 border-slate-200" ${assignment ? 'title="Закрывает автор задания после проверки"' : ''}></span>`);
+            const assignmentChip = assignment
+                ? `<span data-assignment class="inline-flex items-center gap-1 bg-amber-50 text-amber-800 border border-amber-200 text-[11px] font-medium px-2 py-0.5 rounded"><i class="fa-solid fa-user-tie"></i>Задание от ${escapeHtml(taskOwnerLabel(task))}</span>`
+                : '';
 
             return `
                 <div class="hover:bg-slate-50/80 transition-colors task-row px-4 py-3 flex items-start gap-2.5 ${task.struck ? 'bg-slate-50/60' : ''} ${canEditTasks ? 'cursor-pointer' : ''}" ${canEditTasks ? `onclick="editTask('${task.id}')"` : ''} ${dragAttrs}>
-                    ${canEditTasks ? `<div class="pt-1 flex-shrink-0 text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing" title="Перетащите, чтобы изменить порядок или группу"><i class="fa-solid fa-grip-vertical text-xs"></i></div>` : ''}
+                    ${canEditTasks && !assignment ? `<div class="pt-1 flex-shrink-0 text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing" title="Перетащите, чтобы изменить порядок или группу"><i class="fa-solid fa-grip-vertical text-xs"></i></div>` : ''}
                     <div class="flex-grow min-w-0">
                         <div class="flex items-start justify-between gap-2">
                             <div class="font-semibold text-slate-800 text-sm break-words ${task.struck ? 'line-through decoration-2 text-slate-400' : ''}">${escapeHtml(task.title)}</div>
@@ -3023,7 +3046,7 @@
                         </div>
                         ${task.notes ? `<div class="text-xs text-slate-400 mt-0.5 break-words ${task.struck ? 'line-through' : ''}"><i class="fa-regular fa-note-sticky mr-1"></i>${escapeHtml(task.notes)}</div>` : ''}
                         <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
-                            ${assigneeChip}
+                            ${assignmentChip}${assigneeChip}
                             <span class="inline-flex items-center gap-1 text-[11px] text-slate-500"><i class="fa-regular fa-calendar text-slate-400"></i>${formatDateDisplay(task.startDate)} &rarr; ${formatDateDisplay(task.dueDate)}</span>
                             ${deadlineBadge}
                             ${canEditTasks ? `<button onclick="event.stopPropagation(); cycleTaskStatus('${task.id}')">${statusBadge}</button>` : statusBadge}
@@ -3054,7 +3077,8 @@
         async function cycleTaskStatus(taskId) {
             const task = appData.tasks.find(t => t.id === taskId);
             if (!task) return;
-            const statuses = ['new', 'in_progress', 'review', 'completed'];
+            if (taskIsAssignment(task) && task.status === 'completed') return;
+            const statuses = taskIsAssignment(task) ? ['new', 'in_progress', 'review'] : ['new', 'in_progress', 'review', 'completed'];
             const nextStatus = statuses[(statuses.indexOf(task.status) + 1) % statuses.length];
             const progress = nextStatus === 'completed' ? 100 : (nextStatus === 'new' ? 0 : task.progress);
 
@@ -3066,7 +3090,7 @@
         const taskBeforeStruck = new Map();   // статус и процент до галочки — чтобы вернуть их, если галочку сняли по ошибке
         async function toggleTaskStruck(taskId) {
             const task = appData.tasks.find(t => t.id === taskId);
-            if (!task) return;
+            if (!task || taskIsAssignment(task)) return;
             const newVal = !task.struck;
             // Галочка = работа выполнена: статус «Завершено» и 100%. Снятая галочка возвращает прежние статус и процент
             // (если они известны в этом сеансе), иначе работа становится «В процессе».
@@ -3103,7 +3127,9 @@
                 opt.value = w.id; opt.textContent = `${w.name} (${w.role || 'Сотрудник'})`;
                 workerSelect.appendChild(opt);
             });
+            if (!preselectWorkerId && currentUserRole === 'manager') preselectWorkerId = deskWorkerId(appData.taskDesk) || '';
             if (preselectWorkerId) workerSelect.value = preselectWorkerId;
+            taskSetAssignmentMode(null);
             if (preselectCategory) document.getElementById('taskCategory').value = preselectCategory;
 
             document.getElementById('taskStartDate').value = getFormattedDate(0);
@@ -3132,11 +3158,24 @@
             document.getElementById('taskProgress').value = task.progress || 0;
             document.getElementById('taskProgressVal').innerText = task.progress || 0;
             document.getElementById('taskNotes').value = task.notes || '';
+            taskSetAssignmentMode(taskIsAssignment(task) ? task : null);
 
             // Работа уже существует — показываем раздел файлов и загружаем список
             document.getElementById('taskAttachmentsNewHint').classList.add('hidden');
             document.getElementById('taskAttachmentsSection').classList.remove('hidden');
             await renderTaskAttachments(task.id);
+        }
+
+        // В задании от другого: сроки и исполнитель только для просмотра, «Завершено» не выбрать.
+        function taskSetAssignmentMode(task) {
+            const on = !!task;
+            ['taskStartDate', 'taskDueDate', 'taskWorkerId'].forEach(id => { document.getElementById(id).disabled = on; });
+            const st = document.getElementById('taskStatus');
+            [...st.options].forEach(o => { if (o.value === 'completed') o.disabled = on && task.status !== 'completed'; });
+            st.disabled = on && task.status === 'completed';
+            const hint = document.getElementById('taskAssignmentHint');
+            hint.classList.toggle('hidden', !on);
+            if (on) hint.textContent = `Задание от ${taskOwnerLabel(task)}: сроки, исполнителя и закрытие меняет только он. Отмечайте процент и статус, а когда сделаете — «На проверке».`;
         }
 
         async function saveTask(event) {
@@ -3165,10 +3204,16 @@
                     .filter(t => t.projectId === appData.currentProjectId && groupKeyOf(t) === groupKey)
                     .map(t => t.order || 0);
                 payload.sort_order = (siblingOrders.length ? Math.max(...siblingOrders) : 0) + 10;
-                // Работа попадает в тот список, который сейчас открыт (свой или выбранного руководителем человека).
-                if (appData.taskOwners) payload.owner_id = appData.taskDesk || null;
+                // Работа попадает в тот список, который сейчас открыт. Руководитель в списке человека, связанного
+                // с «Сотрудниками», создаёт своё задание ему (сроки и закрытие остаются за руководителем).
+                if (appData.taskOwners) payload.owner_id = currentUserRole === 'manager' && deskWorkerId(appData.taskDesk) ? null : (appData.taskDesk || null);
             }
 
+            const editing = id && appData.tasks.find(t => t.id === id);
+            if (editing && taskIsAssignment(editing)) {
+                delete payload.start_date; delete payload.due_date; delete payload.worker_id;
+                if (payload.status === 'completed' || editing.status === 'completed') payload.status = editing.status;
+            }
             const { error } = id
                 ? await sb.from('tasks').update(payload).eq('id', id)
                 : await sb.from('tasks').insert(payload);
@@ -3179,6 +3224,7 @@
         }
 
         async function deleteTask(taskId) {
+            if (taskIsAssignment(appData.tasks.find(t => t.id === taskId))) return;
             if (!confirm('Вы уверены, что хотите удалить эту работу?')) return;
             const { error } = await sb.from('tasks').delete().eq('id', taskId);
             if (error) { alert('Ошибка удаления: ' + error.message); return; }
@@ -10168,6 +10214,13 @@
                                 ${['customer', 'worker', 'brigadier', 'foreman', 'lead', 'accountant', 'pto', 'manager'].map(k => `<option value="${k}" ${profileRoleKey(p) === k ? 'selected' : ''}>${roleLabel(k)}</option>`).join('')}
                             </select>
                         </div>
+                        ${['worker', 'lead'].includes(p.role) ? `<div class="mt-2 flex items-center gap-2 text-xs text-slate-500 flex-wrap">
+                            <span>Он в списке сотрудников (работы на него из вашего списка видны ему как задания):</span>
+                            <select data-user-worker="${p.id}" onchange="updateUserWorker('${p.id}', this.value)" class="text-xs border border-slate-300 rounded-lg px-2 py-1 max-w-full focus:outline-none focus:ring-2 focus:ring-brand-500">
+                                <option value="">— не связан —</option>
+                                ${appData.workers.slice().sort((a, b) => a.name.localeCompare(b.name, 'ru')).map(w => `<option value="${escapeHtml(w.id)}" ${p.worker_id === w.id ? 'selected' : ''}>${escapeHtml(w.name)}${w.groupName ? ' · ' + escapeHtml(w.groupName) : ''}</option>`).join('')}
+                            </select>
+                        </div>` : ''}
                         ${p.role === 'worker' ? `<div class="mt-2 flex items-center gap-2 text-xs text-slate-500">
                             <span>Бригада в табеле (отмечает только её):</span>
                             <select data-user-brigade="${p.id}" onchange="updateUserBrigade('${p.id}', this.value)" class="text-xs border border-slate-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-500">
@@ -10188,6 +10241,11 @@
             if (!STAFF_ROLES[key] && prev?.staff_role) patch.staff_role = null;
             const { error } = await sb.from('profiles').update(patch).eq('id', userId);
             if (error) { alert('Ошибка: ' + error.message + (/staff_role/.test(error.message) ? '\n\nВ базе ещё нет полей для должностей — выполните supabase/staff_roles.sql.' : '')); return; }
+            await renderUsersList();
+        }
+        async function updateUserWorker(userId, workerId) {
+            const { error } = await sb.from('profiles').update({ worker_id: workerId || null }).eq('id', userId);
+            if (error) { alert('Ошибка: ' + error.message + (/worker_id/.test(error.message) ? '\n\nВ базе ещё нет этого поля — выполните supabase/assignments.sql.' : '')); return; }
             await renderUsersList();
         }
         async function updateUserBrigade(userId, brigade) {

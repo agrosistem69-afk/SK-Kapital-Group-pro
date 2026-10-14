@@ -984,6 +984,67 @@ test('Свои списки работ: у сотрудника свой, рук
     expect(!dan.errors.length && !greg.errors.length, 'ошибки на странице: ' + dan.errors.concat(greg.errors).join('; '));
 });
 
+test('Задания бригадиру: видны у него, сроки и закрытие только у руководителя', async () => {
+    const tasks = [
+        { id: 'a1', project_id: 'p1', worker_id: 'w5', title: 'Укладка плитки', category: 'Участок 1', status: 'new', progress: 0, start_date: '2026-10-10', due_date: '2026-10-20', owner_id: null },
+        { id: 'a2', project_id: 'p1', worker_id: 'w9', title: 'Чужая работа', category: 'Участок 1', status: 'new', progress: 0, owner_id: null },
+        { id: 'a3', project_id: 'p1', worker_id: 'w5', title: 'Своя работа Данияра', category: 'Участок 2', status: 'new', progress: 0, start_date: '2026-10-10', due_date: '2026-10-20', owner_id: 'u5' }];
+    const people = [{ id: 'u1', full_name: 'Грег', role: 'manager' }, { id: 'u5', full_name: 'Данияр', role: 'worker', staff_role: 'brigadier', worker_id: 'w5' }];
+    const open = async (role, me) => {
+        const page = await openApp({ role });
+        await page.evaluate(async ({ tasks, people, me }) => {
+            __db.tasks = tasks.map(t => ({ ...t })); __db.profiles = people;
+            __db.workers = [{ id: 'w5', name: 'Данияр Б.', role: 'Бригадир' }, { id: 'w9', name: 'Руслан Р.', role: 'Бригадир' }];
+            currentUserProfile = people.find(p => p.id === me);
+            appData.currentProjectId = 'p1';
+            await refreshAllData();
+            await openProject('p1');
+        }, { tasks, people, me });
+        return page;
+    };
+    const dan = await open('worker', 'u5');
+    const text = await dan.$eval('#tasksContainer', e => e.innerText);
+    expect(/Укладка плитки/.test(text) && /Своя работа Данияра/.test(text) && !/Чужая работа/.test(text), 'у бригадира не те работы: ' + text);
+    expect(/Задание от руководителя/.test(text), 'не отмечено, что это задание руководителя');
+    // Галочки на задании нет, статус «Завершено» не выставить, сроки не менять.
+    const row = await dan.evaluate(() => {
+        const r = [...document.querySelectorAll('#tasksContainer .task-row')].find(x => x.innerText.includes('Укладка плитки'));
+        return { check: !!r.querySelector('button[title="Отметить работу как выполненную"]'), del: !!r.querySelector('button[title="Удалить"]'), drag: r.getAttribute('draggable') };
+    });
+    expect(!row.check && !row.del && row.drag !== 'true', 'бригадир может закрыть, удалить или перетащить задание: ' + JSON.stringify(row));
+    await dan.evaluate(async () => { await toggleTaskStruck('a1'); for (let i = 0; i < 5; i++) await cycleTaskStatus('a1'); });
+    expect(await dan.evaluate(() => __db.tasks[0].status !== 'completed' && !__db.tasks[0].struck), 'бригадир закрыл задание');
+    await dan.evaluate(() => editTask('a1'));
+    const form = await dan.evaluate(() => ({ start: taskStartDate.disabled, due: taskDueDate.disabled, worker: taskWorkerId.disabled,
+        done: [...taskStatus.options].find(o => o.value === 'completed').disabled, hint: taskAssignmentHint.innerText }));
+    expect(form.start && form.due && form.worker && form.done && /сроки/.test(form.hint), 'в форме задания можно менять сроки или закрыть: ' + JSON.stringify(form));
+    await dan.evaluate(async () => {
+        taskTitle.value = 'Укладка плитки, секция 2'; taskStatus.value = 'review'; document.getElementById('taskProgress').value = 100;
+        taskDueDate.value = '2026-12-31';
+        await saveTask(new Event('submit'));
+    });
+    const a1 = await dan.evaluate(() => ({ ...__db.tasks.find(t => t.id === 'a1') }));
+    expect(a1.title === 'Укладка плитки, секция 2' && a1.status === 'review' && a1.progress === 100 && a1.due_date === '2026-10-20' && a1.worker_id === 'w5',
+        'бригадир сохранил не то: ' + JSON.stringify(a1));
+    // Своя работа бригадира — полностью его: может закрыть галочкой.
+    await dan.evaluate(() => toggleTaskStruck('a3'));
+    expect(await dan.evaluate(() => __db.tasks.find(t => t.id === 'a3').struck === true), 'бригадир не может закрыть свою работу');
+    // Руководитель: в списке Данияра видит задание и его работы; новое задание из его списка — своё, на Данияра.
+    const greg = await open('manager', 'u1');
+    await greg.selectOption('#taskDeskSelect', 'u5');
+    const gt = await greg.$eval('#tasksContainer', e => e.innerText);
+    expect(/Укладка плитки/.test(gt) && /Своя работа Данияра/.test(gt) && !/Чужая работа/.test(gt), 'список Данияра у руководителя: ' + gt);
+    expect(/ваше задание ему/.test(await greg.$eval('#taskDeskBanner', e => e.innerText)), 'не сказано, что работы будут заданиями');
+    await greg.evaluate(async () => { openAddTaskModal(); taskTitle.value = 'Бордюр'; await saveTask(new Event('submit')); });
+    await greg.waitForFunction(() => __db.tasks.some(t => t.title === 'Бордюр'));
+    const b = await greg.evaluate(() => ({ ...__db.tasks.find(t => t.title === 'Бордюр') }));
+    expect(b.owner_id === null && b.worker_id === 'w5', 'задание руководителя создано не так: ' + JSON.stringify(b));
+    // Руководитель закрывает задание галочкой.
+    await greg.evaluate(() => toggleTaskStruck('a1'));
+    expect(await greg.evaluate(() => __db.tasks.find(t => t.id === 'a1').status === 'completed'), 'руководитель не закрыл задание');
+    expect(!dan.errors.length && !greg.errors.length, 'ошибки на странице: ' + dan.errors.concat(greg.errors).join('; '));
+});
+
 test('Пользователи и роли: Бригадир и Прораб, бригада для табеля', async () => {
     const page = await openApp();
     await page.evaluate(async () => {
