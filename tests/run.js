@@ -345,6 +345,42 @@ const PLANZ="${planz}";</script>`;
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
+test('По зонам: у выбранного участка покрытия виден пирог — слои и их объёмы', async () => {
+    // Лист 6.1 со встроенным пирогом (листы 7.1–7.2): под плиткой бетон 120 мм (м³) и плёнка (м²).
+    const rect = (x, y, w, h) => `M${x} ${y}l${w} 0 0 ${h} ${-w} 0z`;
+    const plan = [
+        `<g class="it ld" data-s="lbl" data-h="A1" data-p="5" data-q="20 м²"><rect class="hb" x="20" y="40" width="3" height="2"/><path class="ln" stroke="#000" d="M21 41l-7 10"/></g>`,
+        `<g class="it ld" data-s="lbl" data-h="C1" data-p="6" data-q="4 м²"><rect class="hb" x="2" y="40" width="3" height="2"/><path class="ln" stroke="#000" d="M3 41l1 13"/></g>`,
+        `<g class="it" data-s="cov" data-l="Test" data-p="5" data-src="tip" data-c="A1"><path fill="#ffffca" d="${rect(6, 50, 10, 2)}"/></g>`,
+        `<g class="it" data-s="cov" data-l="Test" data-p="6" data-src="tip" data-c="C1"><path fill="#c4a5e5" d="${rect(3, 53, 2, 2)}"/></g>`,
+    ].join('');
+    const planz = require('zlib').gzipSync(Buffer.from(plan)).toString('base64');
+    const pirog = { 5: { t: 'Плитка', top: 'Плитка 80 мм', L: [['Бетон тестовый', 'м³', 120, 'conc'], ['Плёнка тестовая', 'м²', null, 'film']] },
+                    6: { t: 'Асфальт', top: 'Асфальт 50 мм', L: [['Бетон тестовый', 'м³', 200, 'conc']] } };
+    const html = `<!doctype html><svg id="plan" viewBox="0 30 30 30"><g id="root"></g></svg>
+<script id="skkg-pirog" type="application/json">${JSON.stringify(pirog)}</script><script>
+const S=[["Покрытия",[["5","Плитка тестовая","м²","20"],["6","Асфальт тестовый","м²","4"]]]];
+const TIPS={"5":[[14,51]],"6":[[4,54]]};
+const PLANZ="${planz}";</script>`;
+    const page = await openApp();
+    await page.evaluate(h => { __files['p1/test-sheet.html'] = h; }, html);
+    await openZones(page);
+    expect(!(await page.$('#zonesPirog')), 'пирог виден, хотя ничего не выбрано');
+    const [ax, ay] = await planToScreen(page, 14, 51);
+    await page.mouse.click(ax, ay);
+    let layers = await page.evaluate(() => zonesPirogRows(zonesPickedRows()));
+    expect(JSON.stringify(layers.map(l => [l.name, l.unit, l.qty])) === JSON.stringify([['Бетон тестовый', 'м³', 2.4], ['Плёнка тестовая', 'м²', 20]]),
+        'участок 20 м²: бетон 20 × 0,12 = 2,4 м³ и плёнка 20 м², получено ' + JSON.stringify(layers));
+    const [cx, cy] = await planToScreen(page, 4, 54);
+    await page.mouse.click(cx, cy);
+    layers = await page.evaluate(() => zonesPirogRows(zonesPickedRows()));
+    const beton = layers.find(l => l.name === 'Бетон тестовый');
+    expect(beton && beton.qty === 3.2 && beton.types.join() === '5,6', 'бетон двух типов складывается: 2,4 + 4 × 0,2 = 3,2 м³, получено ' + JSON.stringify(beton));
+    const text = await page.$eval('#zonesPirog', el => el.innerText);
+    expect(/Бетон тестовый/.test(text) && /3,2/.test(text) && /Плёнка тестовая/.test(text), 'в панели нет слоёв: ' + text);
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
 test('По зонам работает на телефоне', async () => {
     const page = await openApp({ width: 390, height: 800 });
     await openZones(page);

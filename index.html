@@ -6685,6 +6685,7 @@
             g.replaceChildren(...[...root.childNodes].map(n => document.importNode(n, true)));
             st.plan = plan;
             st.rows = extractDrawingQuantities(html);
+            st.pirog = extractPirog(html);
             if (plan.viewBox) st.baseVb = plan.viewBox.slice();
             else { const b = g.getBBox(); st.baseVb = [b.x, b.y, b.width, b.height]; }
             st.vb = st.baseVb.slice();
@@ -7299,6 +7300,49 @@
             });
         }
 
+        // Пирог покрытий (лист 6.1 с данными листов 7.1–7.2): какие слои лежат под каждым типом.
+        // {тип: {t, top, L: [[название, ед., толщина мм или null, класс]]}}. Слой в м³ = площадь × толщина, в м² = площадь.
+        function extractPirog(html) {
+            const tag = html.match(/<script[^>]*id=["']skkg-pirog["'][^>]*>([\s\S]*?)<\/script>/);
+            if (!tag) return null;
+            try { return JSON.parse(tag[1]); } catch (e) { return null; }
+        }
+        // Слои под выбранными участками, сложенные по материалу. Площадь типа — его количество в м² (из выносок), иначе площадь контура.
+        function zonesPirogRows(rows) {
+            const pirog = zonesState?.pirog;
+            if (!pirog) return [];
+            const out = new Map();
+            rows.forEach(r => {
+                const P = pirog[r.pos];
+                if (!P) return;
+                const a = /м2|м²/.test(r.unit || '') ? r.qty : r.area;
+                if (!a) return;
+                P.L.forEach(([name, unit, mm]) => {
+                    const vol = unit === 'м³' && mm;
+                    const key = name + '|' + (vol ? 'м³' : 'м²');
+                    if (!out.has(key)) out.set(key, { name, unit: vol ? 'м³' : 'м²', qty: 0, types: new Set() });
+                    const o = out.get(key);
+                    o.qty += vol ? a * mm / 1000 : a;
+                    o.types.add(r.pos);
+                });
+            });
+            return [...out.values()].map(o => ({ ...o, qty: Math.round(o.qty * 100) / 100, types: [...o.types] }));
+        }
+        function zonesPirogHtml(rows) {
+            const layers = zonesPirogRows(rows);
+            if (!layers.length) return '';
+            const missing = rows.filter(r => !zonesState.pirog[r.pos]).map(r => r.pos);
+            return `<div id="zonesPirog" class="mt-4 border border-slate-200 rounded-lg p-3">
+                <div class="text-sm font-bold text-slate-800 mb-1"><i class="fa-solid fa-layer-group text-brand-600 mr-1"></i>Пирог: что уложить под выбранными покрытиями</div>
+                <div class="text-[11px] text-slate-500 mb-2">По листам 7.1–7.2. Само покрытие — в таблице выше. Слой переменной толщины над паркингом дан площадью.</div>
+                <table class="w-full text-sm"><tbody class="divide-y divide-slate-100">${layers.map(l => `
+                    <tr><td class="py-1.5 pr-2 text-slate-800">${escapeHtml(l.name)}<br><span class="text-[11px] text-slate-400">типы ${escapeHtml(l.types.join(', '))}</span></td>
+                    <td class="py-1.5 pl-2 text-right font-semibold whitespace-nowrap">${fmtQty(l.qty)} <span class="font-normal text-slate-400">${l.unit}</span></td></tr>`).join('')}
+                </tbody></table>
+                ${missing.length ? `<div class="text-[11px] text-amber-700 mt-2">Для позиций ${escapeHtml(missing.join(', '))} пирога нет.</div>` : ''}
+            </div>`;
+        }
+
         function zonesRenderPickPanel(panel) {
             const st = zonesState, rows = zonesPickedRows();
             panel.innerHTML = `
@@ -7329,6 +7373,7 @@
                         <span class="font-semibold text-slate-800">Общая площадь выбранных участков</span>
                         <span class="font-bold text-slate-900 whitespace-nowrap">${fmtQty(Math.round(rows.reduce((t, r) => t + r.area, 0) * 10) / 10)} м²</span>
                     </div>
+                    ${zonesPirogHtml(rows)}
                     <button onclick="zonesExportExcel()" class="mt-3 w-full bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold"><i class="fa-solid fa-file-excel mr-1"></i>Скачать в Excel</button>`
                 : '<div class="text-sm text-slate-400">Нажмите на цветник, куст, дерево или газон на плане. Выбранные участки подсветятся оранжевым, а их количество сложится здесь.</div>'}
                 ${zonesOrphansHtml()}
@@ -7371,6 +7416,13 @@
             ws['!cols'] = [{ wch: 6 }, { wch: 50 }, { wch: 6 }, { wch: 10 }, { wch: 12 }, { wch: 12 }];
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, 'Выбранные участки');
+            const layers = zonesPirogRows(rows);
+            if (layers.length) {
+                const wl = XLSX.utils.aoa_to_sheet([[st.drawing.sheet], ['Пирог под выбранными покрытиями (листы 7.1–7.2)'], [],
+                    ['Слой', 'Ед.', 'Количество', 'Типы покрытий'], ...layers.map(l => [l.name, l.unit, l.qty, l.types.join(', ')])]);
+                wl['!cols'] = [{ wch: 50 }, { wch: 6 }, { wch: 12 }, { wch: 30 }];
+                XLSX.utils.book_append_sheet(wb, wl, 'Пирог');
+            }
             XLSX.writeFile(wb, `Объёмы по участкам - ${st.drawing.sheet.replace(/[\\/:*?"<>|]/g, ' ')}.xlsx`);
         }
 
