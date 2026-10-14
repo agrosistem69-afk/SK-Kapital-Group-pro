@@ -16,6 +16,7 @@ const ROOT = path.join(__dirname, '..');
 const SHEET_HTML = fs.readFileSync(path.join(__dirname, 'fixtures', 'test-sheet.html'), 'utf8');
 const FAKE_SUPABASE = fs.readFileSync(path.join(__dirname, 'fake-supabase.js'), 'utf8');
 const XLSX_JS = fs.readFileSync(require.resolve('xlsx/dist/xlsx.full.min.js'), 'utf8');
+const JSPDF_JS = fs.readFileSync(require.resolve('jspdf/dist/jspdf.umd.min.js'), 'utf8');
 
 // Стили Tailwind собираем заранее из index.html, чтобы тестам не нужен был интернет.
 function buildCss() {
@@ -54,6 +55,7 @@ async function openApp({ role = 'manager', admin = false, width = 1280, height =
     // Служебный обработчик (service worker) в тестах пустой, чтобы он не кэшировал файлы между проверками.
     await page.route(/service-worker\.js/, r => r.fulfill({ contentType: 'application/javascript', body: 'self.addEventListener("install", () => self.skipWaiting());' }));
     await page.route(/xlsx[^/]*\.js/, r => r.fulfill({ contentType: 'application/javascript', body: XLSX_JS }));
+    await page.route(/jspdf[^/]*\.js/, r => r.fulfill({ contentType: 'application/javascript', body: JSPDF_JS }));
     await page.goto(baseUrl + '/index.html', { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => typeof applyRoleUI === 'function' && window.__db);
     await page.evaluate(async ({ role, admin, html }) => {
@@ -531,6 +533,23 @@ test('Замечания: скачать картинкой — JPEG с план
     expect(Math.max(dims.w, dims.h) >= 4500, 'картинка мелкая: ' + dims.w + '×' + dims.h);
     expect(dims.reg[2] < dims.vb[2] * 0.999 || dims.reg[3] < dims.vb[3] * 0.999, 'пустые поля окна попали в картинку: ' + JSON.stringify(dims));
     expect(near(dims.reg[2], dims.plan[2] * 1.03, dims.plan[2] * 0.02) || dims.reg[3] <= dims.plan[3] * 1.05, 'кадр не по чертежу: ' + JSON.stringify(dims));
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
+test('Замечания: скачать в PDF — лист с планом и пометками', async () => {
+    const page = await openApp();
+    await openNotes(page);
+    const vb = await page.evaluate(() => notesState.vb);
+    await page.click('#notesToolbar [data-tool="rect"]');
+    await notesDrag(page, [vb[0] + vb[2] * 0.4, vb[1] + vb[3] * 0.4], [vb[0] + vb[2] * 0.6, vb[1] + vb[3] * 0.6]);
+    await page.waitForFunction(() => __db.drawing_notes?.length === 1);
+    await page.evaluate(() => { const c = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { window.__dlName = this.download; return c.call(this); }; });
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#notesToolbar >> text=PDF')]);
+    const buf = fs.readFileSync(await dl.path());
+    const name = await page.evaluate(() => window.__dlName);
+    expect(/\.pdf$/.test(name) && /Лист 1/.test(name), 'имя файла: ' + name);
+    expect(buf.slice(0, 4).toString() === '%PDF' && buf.length > 20000, `это не PDF или он пустой: ${buf.length} байт`);
+    expect(/\/DCTDecode/.test(buf.toString('latin1')), 'в PDF нет картинки чертежа');
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 

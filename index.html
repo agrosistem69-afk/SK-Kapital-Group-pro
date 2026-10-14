@@ -8823,7 +8823,8 @@
                 </select>
                 <span class="w-px h-6 bg-slate-300 mx-1 flex-shrink-0"></span>
                 <button onclick="notesUndo()" title="Отменить мою последнюю пометку" class="w-9 h-9 flex-shrink-0 rounded-lg text-slate-700 hover:bg-slate-200"><i class="fa-solid fa-rotate-left"></i></button>
-                <button onclick="notesExportJpeg()" title="Скачать картинкой (JPEG)" class="h-9 px-3 flex-shrink-0 rounded-lg text-slate-700 hover:bg-slate-200 text-sm font-semibold whitespace-nowrap"><i class="fa-solid fa-image mr-1"></i>JPEG</button>`;
+                <button onclick="notesExportJpeg()" title="Скачать картинкой (JPEG)" class="h-9 px-3 flex-shrink-0 rounded-lg text-slate-700 hover:bg-slate-200 text-sm font-semibold whitespace-nowrap"><i class="fa-solid fa-image mr-1"></i>JPEG</button>
+                <button onclick="notesExportPdf()" title="Скачать PDF: не сжимается в мессенджерах, удобно печатать" class="h-9 px-3 flex-shrink-0 rounded-lg text-slate-700 hover:bg-slate-200 text-sm font-semibold whitespace-nowrap"><i class="fa-solid fa-file-pdf mr-1"></i>PDF</button>`;
             if (st.vb) notesApplyViewBox();
             notesRenderList();
         }
@@ -9077,15 +9078,49 @@
                 return await new Promise(res => c.toBlob(res, 'image/jpeg', 0.93));
             } finally { URL.revokeObjectURL(url); }
         }
+        // PDF: та же чёткая картинка на странице формата A3 (длинная сторона 420 мм, около 300 точек на дюйм).
+        let jspdfLoading = null;
+        function loadJsPdf() {
+            if (window.jspdf?.jsPDF) return Promise.resolve();
+            if (!jspdfLoading) jspdfLoading = new Promise((resolve, reject) => {
+                const sc = document.createElement('script');
+                sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+                sc.onload = resolve; sc.onerror = () => { jspdfLoading = null; reject(new Error('Не удалось загрузить модуль PDF. Проверьте интернет.')); };
+                document.head.appendChild(sc);
+            });
+            return jspdfLoading;
+        }
+        async function notesBuildPdf() {
+            const [jpeg] = await Promise.all([notesBuildJpeg(), loadJsPdf()]);
+            const bytes = new Uint8Array(await jpeg.arrayBuffer());
+            const url = URL.createObjectURL(jpeg);
+            const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Не удалось собрать PDF')); i.src = url; });
+            URL.revokeObjectURL(url);
+            const w = img.naturalWidth, h = img.naturalHeight, L = 420;
+            const pw = w >= h ? L : L * w / h, ph = w >= h ? L * h / w : L;
+            const doc = new window.jspdf.jsPDF({ orientation: w >= h ? 'landscape' : 'portrait', unit: 'mm', format: [pw, ph], compress: true });
+            doc.setProperties({ title: `${notesState.drawing.sheet} — замечания` });
+            doc.addImage(bytes, 'JPEG', 0, 0, pw, ph);
+            return doc.output('blob');
+        }
+        function notesDownload(blob, ext) {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `Замечания - ${notesState.drawing.sheet.replace(/[\\/:*?"<>|]/g, ' ')}.${ext}`;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        }
+        async function notesExportPdf() {
+            if (!notesState?.vb) return;
+            let blob;
+            try { blob = await notesBuildPdf(); } catch (e) { alert(e.message); return; }
+            notesDownload(blob, 'pdf');
+        }
         async function notesExportJpeg() {
             if (!notesState?.vb) return;
             let blob;
             try { blob = await notesBuildJpeg(); } catch (e) { alert(e.message); return; }
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = `Замечания - ${notesState.drawing.sheet.replace(/[\\/:*?"<>|]/g, ' ')}.jpg`;
-            document.body.appendChild(a); a.click(); a.remove();
-            setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+            notesDownload(blob, 'jpg');
         }
 
         // Водяной знак с почтой зрителя и датой: по снимку экрана видно, чей это просмотр.
