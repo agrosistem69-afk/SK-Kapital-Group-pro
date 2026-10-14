@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '33';
+        window.APP_VERSION = '34';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=33">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=33">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=33">
+    <link rel="stylesheet" href="vendor/app.css?v=34">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=34">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=34">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=33" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=33" defer></script>
-    <script src="vendor/jszip.min.js?v=33" defer></script>
+    <script src="vendor/html2canvas.min.js?v=34" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=34" defer></script>
+    <script src="vendor/jszip.min.js?v=34" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=33"></script>
+    <script src="vendor/supabase.js?v=34"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -578,6 +578,16 @@
                 </div>
             </div>
 
+            <!-- Руководитель выбирает, чей список работ открыть -->
+            <div id="taskDeskWrap" class="hidden items-center gap-2 mb-3 flex-wrap">
+                <label for="taskDeskSelect" class="text-sm font-semibold text-slate-600"><i class="fa-solid fa-user-group mr-1 text-slate-400"></i>Список работ:</label>
+                <select id="taskDeskSelect" onchange="setTaskDesk(this.value)" class="bg-white border border-slate-300 rounded-lg text-sm px-3 py-2 max-w-full focus:outline-none focus:ring-2 focus:ring-brand-500"></select>
+            </div>
+            <div id="taskDeskBanner" class="hidden items-center justify-between gap-3 mb-3 bg-amber-50 border border-amber-200 text-amber-900 text-sm rounded-xl px-4 py-2.5 flex-wrap">
+                <span><i class="fa-solid fa-eye mr-1.5"></i>Вы в списке работ: <b id="taskDeskBannerName"></b>. Новые работы попадут к нему.</span>
+                <button onclick="setTaskDesk('')" class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white border border-amber-300 hover:bg-amber-100">Вернуться к своему</button>
+            </div>
+
             <!-- Action & Filter Controls -->
             <div class="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-4 mb-6">
                 <div class="flex flex-wrap items-center gap-2 flex-grow">
@@ -795,7 +805,8 @@
                 </div>
 
                 <div id="timesheetBody">
-                    <div data-roles="manager,worker,lead" class="hidden mb-3 space-y-2">
+                    <p id="timesheetBrigadeNote" class="hidden text-[11px] text-amber-700 bg-amber-50 rounded-lg px-2.5 py-1.5 mb-2"></p>
+                    <div id="timesheetEditTools" data-roles="manager,worker,lead" class="hidden mb-3 space-y-2">
                         <div class="flex items-center gap-2 flex-wrap">
                             <div id="timesheetAddExistingWrap" class="hidden items-center gap-2 flex-wrap">
                                 <select id="timesheetAddWorkerSelect" class="flex-grow max-w-xs bg-white border border-slate-300 rounded-lg text-xs px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500">
@@ -861,7 +872,7 @@
                     </span>
                     <span class="text-[10.5px] leading-tight font-medium text-center break-words">Объёмы</span>
                 </button>
-                <button id="navMoreBtn" data-roles="manager,worker,lead,pto,accountant" onclick="openModal('mobileMenuModal')" class="hidden flex-col items-center justify-center gap-1 py-2 px-0.5 hover:text-brand-600 transition-colors">
+                <button id="navMoreBtn" data-roles="manager,lead,pto,accountant" onclick="openModal('mobileMenuModal')" class="hidden flex-col items-center justify-center gap-1 py-2 px-0.5 hover:text-brand-600 transition-colors">
                     <span class="nav-icon-wrap relative w-11 h-6 rounded-full flex items-center justify-center">
                         <i class="fa-solid fa-ellipsis text-lg"></i>
                         <span id="moreBadge" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500"></span>
@@ -2032,8 +2043,14 @@
         }
 
         function roleLabel(role) {
-            return { manager: 'Руководитель', lead: 'Руководство', worker: 'Сотрудник', customer: 'Заказчик', accountant: 'Бухгалтерия', pto: 'ПТО' }[role] || role;
+            return { manager: 'Руководитель', lead: 'Руководство', worker: 'Сотрудник', customer: 'Заказчик', accountant: 'Бухгалтерия', pto: 'ПТО', brigadier: 'Бригадир', foreman: 'Прораб' }[role] || role;
         }
+        // Должности «Бригадир» и «Прораб» хранятся отдельно (profiles.staff_role), а права берутся из обычной роли:
+        // бригадир — как сотрудник (role = worker), прораб — как руководство объекта (role = lead).
+        // Так все прежние правила доступа в базе работают для них без изменений.
+        const STAFF_ROLES = { brigadier: 'worker', foreman: 'lead' };
+        const profileRoleKey = p => (p && STAFF_ROLES[p.staff_role] ? p.staff_role : p?.role);
+        const profileRoleLabel = p => roleLabel(profileRoleKey(p));
 
         function openModal(modalId) { document.getElementById(modalId).classList.remove('hidden'); }
         function closeModal(modalId) { document.getElementById(modalId).classList.add('hidden'); }
@@ -2276,8 +2293,8 @@
             document.getElementById('authCheckingScreen').classList.add('hidden');
             document.getElementById('loginScreen').classList.add('hidden');
             document.getElementById('appRoot').classList.remove('hidden');
-            document.getElementById('currentUserLabel').textContent = `${profile.full_name || profile.email} · ${roleLabel(currentUserRole)}`;
-            document.getElementById('accountModalUserLabel').textContent = `${profile.full_name || profile.email} · ${roleLabel(currentUserRole)}`;
+            document.getElementById('currentUserLabel').textContent = `${profile.full_name || profile.email} · ${profileRoleLabel(profile)}`;
+            document.getElementById('accountModalUserLabel').textContent = `${profile.full_name || profile.email} · ${profileRoleLabel(profile)}`;
 
             applyRoleUI(currentUserRole);
             await loadDrawingsAdminFlag();
@@ -2309,13 +2326,23 @@
 
             appData.projects = (projectsRes.data || []).map(p => ({ id: p.id, name: p.name, description: p.description, coverImage: p.cover_image || null }));
             appData.workers = (workersRes.data || []).map(w => ({ id: w.id, name: w.name, role: w.role, groupName: w.group_name || '' }));
-            appData.tasks = (tasksRes.data || []).map(t => ({
+            const taskRows = tasksRes.data || [];
+            // Есть ли в базе поле «чей список» (supabase/staff_roles.sql). Пока нет — все видят один общий список, как раньше.
+            if (taskRows.length) appData.taskOwners = 'owner_id' in taskRows[0];
+            else if (appData.taskOwners === undefined) appData.taskOwners = !(await sb.from('tasks').select('owner_id').limit(1)).error;
+            appData.allTasks = taskRows.map(t => ({
+                ownerId: t.owner_id || null,
                 id: t.id, projectId: t.project_id, workerId: t.worker_id, title: t.title,
                 category: t.category, startDate: t.start_date, dueDate: t.due_date,
                 status: t.status, progress: t.progress, notes: t.notes,
                 order: (t.sort_order === null || t.sort_order === undefined) ? 0 : t.sort_order,
                 struck: !!t.struck
             }));
+            if (currentUserRole === 'manager') {
+                const { data: people } = await sb.from('profiles').select('*').order('full_name');
+                appData.people = people || [];
+            }
+            applyTaskDesk();
             appData.recipients = (recipientsRes.data || []).map(r => ({ id: r.id, name: r.name, channel: r.channel, value: r.value }));
 
             const settingsMap = {};
@@ -2329,6 +2356,46 @@
             }
             appData.accordionState = loadAccordionState();
             appData.hideStruckState = loadHideStruckState();
+        }
+
+        // -------------------- СВОЙ СПИСОК РАБОТ У КАЖДОГО --------------------
+        // У каждого сотрудника, бригадира, прораба и руководства — свой список работ (tasks.owner_id = он).
+        // Список руководителя — общий, как был раньше (owner_id пустой); его же видят заказчик, бухгалтерия и ПТО.
+        // Руководитель может открыть список любого человека и работать в нём, как в своём.
+        function defaultTaskDesk() {
+            return ['worker', 'lead'].includes(currentUserRole) ? (currentUserProfile?.id || null) : null;
+        }
+        function applyTaskDesk() {
+            if (appData.taskDesk === undefined || currentUserRole !== 'manager') appData.taskDesk = defaultTaskDesk();
+            const all = appData.allTasks || [];
+            appData.tasks = appData.taskOwners ? all.filter(t => (t.ownerId || null) === appData.taskDesk) : all.slice();
+        }
+        function setTaskDesk(ownerId) {
+            appData.taskDesk = ownerId || null;
+            applyTaskDesk();
+            renderApp();
+        }
+        function renderTaskDeskPicker() {
+            const wrap = document.getElementById('taskDeskWrap'), banner = document.getElementById('taskDeskBanner');
+            if (!wrap) return;
+            const show = currentUserRole === 'manager' && appData.taskOwners;
+            wrap.classList.toggle('hidden', !show);
+            wrap.classList.toggle('flex', !!show);
+            if (!show) { banner.classList.add('hidden'); return; }
+            const me = currentUserProfile?.id;
+            const people = (appData.people || []).filter(p => p.id !== me && ['worker', 'lead'].includes(p.role));
+            const order = { foreman: 0, lead: 1, brigadier: 2, worker: 3 };
+            people.sort((a, b) => (order[profileRoleKey(a)] ?? 9) - (order[profileRoleKey(b)] ?? 9) || (a.full_name || a.email || '').localeCompare(b.full_name || b.email || '', 'ru'));
+            const sel = document.getElementById('taskDeskSelect');
+            sel.innerHTML = `<option value="">Мой список работ</option>` + people.map(p => {
+                const n = (appData.allTasks || []).filter(t => t.ownerId === p.id && t.projectId === appData.currentProjectId).length;
+                return `<option value="${escapeHtml(p.id)}" ${appData.taskDesk === p.id ? 'selected' : ''}>${escapeHtml(p.full_name || p.email || 'Без имени')} · ${profileRoleLabel(p)}${n ? ` (${n})` : ''}</option>`;
+            }).join('');
+            sel.value = appData.taskDesk || '';
+            const who = people.find(p => p.id === appData.taskDesk);
+            banner.classList.toggle('hidden', !who);
+            banner.classList.toggle('flex', !!who);
+            if (who) document.getElementById('taskDeskBannerName').textContent = `${who.full_name || who.email} · ${profileRoleLabel(who)}`;
         }
 
         async function refreshAllData() {
@@ -2377,6 +2444,7 @@
             renderBoardsScreen();
             renderProjectOverview();
             renderWorkerFilterDropdown();
+            renderTaskDeskPicker();
             renderTasksList();
             renderWorkersModalList();
             renderRecipientsLists();
@@ -3097,6 +3165,8 @@
                     .filter(t => t.projectId === appData.currentProjectId && groupKeyOf(t) === groupKey)
                     .map(t => t.order || 0);
                 payload.sort_order = (siblingOrders.length ? Math.max(...siblingOrders) : 0) + 10;
+                // Работа попадает в тот список, который сейчас открыт (свой или выбранного руководителем человека).
+                if (appData.taskOwners) payload.owner_id = appData.taskDesk || null;
             }
 
             const { error } = id
@@ -4165,7 +4235,20 @@
             // Обновляем список для добавления сотрудников в табель (только те, кого ещё нет в ростере)
             const addSelect = document.getElementById('timesheetAddWorkerSelect');
             const rosterWorkerIds = new Set(timesheetRoster.map(r => r.workerId));
-            const available = appData.workers.filter(w => !rosterWorkerIds.has(w.id));
+            const brigade = myBrigade();
+            const available = appData.workers.filter(w => !rosterWorkerIds.has(w.id) && (!brigade || sameBrigade(w.groupName, brigade)));
+            // Сотрудник/бригадир добавляет людей только в свою бригаду; без бригады — не добавляет вовсе.
+            const tools = document.getElementById('timesheetEditTools');
+            const canAdd = ['manager', 'lead'].includes(currentUserRole) || !!brigade;
+            if (['manager', 'lead', 'worker'].includes(currentUserRole)) tools.classList.toggle('hidden', !canAdd);
+            const groupInput = document.getElementById('timesheetNewWorkerGroup');
+            groupInput.readOnly = !!brigade;
+            if (brigade) groupInput.value = brigade;
+            const note = document.getElementById('timesheetBrigadeNote');
+            note.textContent = currentUserRole === 'worker'
+                ? (brigade ? `Вы отмечаете только свою бригаду «${brigade}». Остальные бригады видны для просмотра.` : 'Отмечать в табеле можно будет, когда руководитель назначит вам бригаду.')
+                : '';
+            note.classList.toggle('hidden', !note.textContent);
             addSelect.innerHTML = '<option value="">Добавить существующего сотрудника...</option>' +
                 available.map(w => `<option value="${w.id}">${escapeHtml(w.name)}</option>`).join('');
             // Блок "добавить существующего" нужен только если вообще есть кого добавлять — если все
@@ -4226,7 +4309,7 @@
 
             const name = document.getElementById('timesheetNewWorkerName').value.trim();
             const role = document.getElementById('timesheetNewWorkerRole').value.trim();
-            const groupName = document.getElementById('timesheetNewWorkerGroup').value.trim();
+            const groupName = myBrigade() || document.getElementById('timesheetNewWorkerGroup').value.trim();
             if (!name) return;
 
             isAddingTimesheetWorker = true;
@@ -4253,12 +4336,26 @@
             }
         }
 
+        // Кто какую бригаду отмечает в табеле. Видят табель все, а отмечать:
+        // руководитель, руководство и прораб — любую бригаду; сотрудник и бригадир — только свою
+        // (её назначают в «Пользователи и роли»); остальные — ничего.
+        const sameBrigade = (a, b) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
+        const myBrigade = () => (currentUserRole === 'worker' ? (currentUserProfile?.brigade || '').trim() : '');
+        function timesheetCanEditGroup(groupKey) {
+            if (['manager', 'lead'].includes(currentUserRole)) return true;
+            if (currentUserRole !== 'worker') return false;
+            return !!myBrigade() && groupKey !== '__none__' && sameBrigade(groupKey, myBrigade());
+        }
+        const timesheetCanEditWorker = workerId => {
+            const w = appData.workers.find(x => x.id === workerId);
+            return timesheetCanEditGroup(w && w.groupName ? w.groupName : '__none__');
+        };
+
         function renderTimesheetGrid(projectId, year, month, totalDays) {
             const headerRow = document.getElementById('timesheetHeaderRow');
             const tbody = document.getElementById('timesheetTableBody');
             const emptyState = document.getElementById('timesheetEmptyState');
             const today = getFormattedDate(0);
-            const canEdit = ['manager', 'worker', 'lead'].includes(currentUserRole);
             const canRemove = ['manager', 'lead'].includes(currentUserRole);
 
             let daysHeader = `<th class="sticky left-0 bg-white z-10 text-center px-1.5 py-1.5 font-semibold text-slate-400 w-8">№</th><th class="sticky left-8 bg-white z-10 text-left px-2 py-1.5 font-semibold text-slate-500 min-w-[110px]">Сотрудник</th>`;
@@ -4317,6 +4414,7 @@
                 </tr>`;
 
                 if (isCollapsed) return;
+                const canEdit = timesheetCanEditGroup(groupKey);
 
                 groups[groupKey].forEach((worker, idx) => {
                     let cells = '';
@@ -4339,7 +4437,7 @@
                             }
                         }
                         const clickable = canEdit ? `onclick="toggleTimesheetCell('${projectId}', '${worker.workerId}', '${dateStr}')"` : '';
-                        cells += `<td class="p-0"><div ${clickable} class="w-7 h-7 flex items-center justify-center text-[10px] font-bold rounded cursor-pointer select-none transition-colors ${cellClass}">${cellContent}</div></td>`;
+                        cells += `<td class="p-0"><div ${clickable} data-ts-cell="${worker.workerId}_${dateStr}" class="w-7 h-7 flex items-center justify-center text-[10px] font-bold rounded ${canEdit ? 'cursor-pointer' : 'cursor-default'} select-none transition-colors ${cellClass}">${cellContent}</div></td>`;
                     }
                     const removeBtn = canRemove
                         ? `<button onclick="removeWorkerFromTimesheetRoster('${worker.rosterId}')" class="ml-1.5 text-slate-300 hover:text-rose-500" title="Убрать из табеля"><i class="fa-solid fa-xmark text-[10px]"></i></button>`
@@ -4398,7 +4496,7 @@
                 : ymd(viewedYear, viewedMonth, 1);
             document.getElementById('tsPhotosDate').value = defaultDate;
 
-            const canUpload = ['manager', 'worker', 'lead'].includes(currentUserRole);
+            const canUpload = timesheetCanEditGroup(groupKey);
             const uploadLabel = document.getElementById('tsPhotosUploadLabel');
             uploadLabel.classList.toggle('hidden', !canUpload);
             uploadLabel.classList.toggle('flex', canUpload);
@@ -4430,7 +4528,7 @@
                 return;
             }
 
-            const canDelete = ['manager', 'worker', 'lead'].includes(currentUserRole);
+            const canDelete = timesheetCanEditGroup(tsPhotosModalGroupKey);
             const cards = await Promise.all(data.map(async (p) => {
                 const { data: signed } = await sb.storage.from(TIMESHEET_PHOTOS_BUCKET).createSignedUrl(p.file_path, 3600);
                 const url = signed ? signed.signedUrl : '#';
@@ -4507,6 +4605,7 @@
         }
 
         async function toggleTimesheetCell(projectId, workerId, dateStr) {
+            if (!timesheetCanEditWorker(workerId)) return;
             const key = `${workerId}_${dateStr}`;
             const entry = timesheetEntries[key];
 
@@ -9902,7 +10001,7 @@
                 exportedAt: new Date().toISOString(),
                 projects: appData.projects,
                 workers: appData.workers,
-                tasks: appData.tasks,
+                tasks: appData.allTasks || appData.tasks,
                 recipients: appData.recipients,
                 telegramBotToken: appData.telegramBotToken
             };
@@ -10035,6 +10134,7 @@
         }
 
         // -------------------- ПОЛЬЗОВАТЕЛИ И РОЛИ (руководитель) --------------------
+        let usersListProfiles = [];
         async function openUsersModal() {
             openModal('usersModal');
             await renderUsersList();
@@ -10042,6 +10142,7 @@
 
         async function renderUsersList() {
             const { data: profiles } = await sb.from('profiles').select('*').order('created_at');
+            usersListProfiles = profiles || [];
             const { data: members } = await sb.from('project_members').select('*');
             const container = document.getElementById('usersListContainer');
 
@@ -10063,25 +10164,42 @@
                                 <div class="text-sm font-semibold text-slate-800">${escapeHtml(p.full_name || 'Без имени')}</div>
                                 <div class="text-xs text-slate-500">${escapeHtml(p.email)}</div>
                             </div>
-                            <select onchange="updateUserRole('${p.id}', this.value)" class="text-xs border border-slate-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500">
-                                <option value="customer" ${p.role === 'customer' ? 'selected' : ''}>Заказчик</option>
-                                <option value="worker" ${p.role === 'worker' ? 'selected' : ''}>Сотрудник</option>
-                                <option value="lead" ${p.role === 'lead' ? 'selected' : ''}>Руководство</option>
-                                <option value="accountant" ${p.role === 'accountant' ? 'selected' : ''}>Бухгалтерия</option>
-                                <option value="pto" ${p.role === 'pto' ? 'selected' : ''}>ПТО</option>
-                                <option value="manager" ${p.role === 'manager' ? 'selected' : ''}>Руководитель</option>
+                            <select data-user-role="${p.id}" onchange="updateUserRole('${p.id}', this.value)" class="text-xs border border-slate-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500">
+                                ${['customer', 'worker', 'brigadier', 'foreman', 'lead', 'accountant', 'pto', 'manager'].map(k => `<option value="${k}" ${profileRoleKey(p) === k ? 'selected' : ''}>${roleLabel(k)}</option>`).join('')}
                             </select>
                         </div>
+                        ${p.role === 'worker' ? `<div class="mt-2 flex items-center gap-2 text-xs text-slate-500">
+                            <span>Бригада в табеле (отмечает только её):</span>
+                            <select data-user-brigade="${p.id}" onchange="updateUserBrigade('${p.id}', this.value)" class="text-xs border border-slate-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-500">
+                                <option value="">— не выбрана —</option>
+                                ${allBrigadeNames(p.brigade).map(b => `<option value="${escapeHtml(b)}" ${p.brigade === b ? 'selected' : ''}>${escapeHtml(b)}</option>`).join('')}
+                            </select>
+                        </div>` : ''}
                         ${projectCheckboxes ? `<div class="mt-2 flex flex-wrap gap-2">${projectCheckboxes}</div>` : `<div class="mt-2 text-[11px] text-slate-400">${p.role === 'accountant' ? 'Видит накладные/УПД со всех проектов автоматически (роль "Бухгалтерия")' : p.role === 'pto' ? 'Видит исполнительную документацию и задачи ПТО со всех проектов автоматически (роль "ПТО")' : 'Видит все проекты автоматически (роль "Руководитель")'}</div>`}
                     </div>
                 `;
             }).join('');
         }
 
-        async function updateUserRole(userId, role) {
-            const { error } = await sb.from('profiles').update({ role }).eq('id', userId);
-            if (error) { alert('Ошибка: ' + error.message); return; }
+        async function updateUserRole(userId, key) {
+            const patch = STAFF_ROLES[key] ? { role: STAFF_ROLES[key], staff_role: key } : { role: key };
+            // staff_role очищаем, только если он был: до обновления базы (supabase/staff_roles.sql) этого поля ещё нет.
+            const prev = (usersListProfiles || []).find(p => p.id === userId);
+            if (!STAFF_ROLES[key] && prev?.staff_role) patch.staff_role = null;
+            const { error } = await sb.from('profiles').update(patch).eq('id', userId);
+            if (error) { alert('Ошибка: ' + error.message + (/staff_role/.test(error.message) ? '\n\nВ базе ещё нет полей для должностей — выполните supabase/staff_roles.sql.' : '')); return; }
             await renderUsersList();
+        }
+        async function updateUserBrigade(userId, brigade) {
+            const { error } = await sb.from('profiles').update({ brigade: brigade || null }).eq('id', userId);
+            if (error) { alert('Ошибка: ' + error.message + (/brigade/.test(error.message) ? '\n\nВ базе ещё нет поля бригады — выполните supabase/staff_roles.sql.' : '')); return; }
+            await renderUsersList();
+        }
+        // Все названия бригад (групп в табеле) у сотрудников компании.
+        function allBrigadeNames(extra) {
+            const names = new Set(appData.workers.map(w => (w.groupName || '').trim()).filter(Boolean));
+            if (extra) names.add(extra);
+            return [...names].sort((a, b) => a.localeCompare(b, 'ru'));
         }
 
         async function toggleProjectMember(userId, projectId, checked) {

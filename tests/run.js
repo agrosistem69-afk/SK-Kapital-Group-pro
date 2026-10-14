@@ -873,6 +873,142 @@ test('Задачи: галочка ставит «Завершено» и 100%, 
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
+// Табель с двумя бригадами: «Данияр» и «Руслан».
+async function openTimesheet(page, profile) {
+    await page.evaluate(async profile => {
+        currentUserProfile = profile;
+        __db.workers = [{ id: 'w1', name: 'Иванов Иван', role: 'Монтажник', group_name: 'Данияр' }, { id: 'w2', name: 'Петров Пётр', role: 'Монтажник', group_name: 'Руслан' },
+            { id: 'w3', name: 'Сидоров Сидор', role: 'Монтажник', group_name: 'Данияр' }];
+        __db.project_workers = [{ id: 'r1', project_id: 'p1', worker_id: 'w1' }, { id: 'r2', project_id: 'p1', worker_id: 'w2' }];
+        __db.timesheet_entries = [];
+        appData.currentProjectId = 'p1';
+        await refreshAllData();
+        await openProject('p1');
+        await renderTimesheetSection('p1');
+    }, profile);
+}
+const tsCell = (page, wid, day) => page.evaluate(([wid, day]) => {
+    const d = ymd(timesheetViewDate.getFullYear(), timesheetViewDate.getMonth(), day);
+    const el = document.querySelector(`[data-ts-cell="${wid}_${d}"]`);
+    return { exists: !!el, clickable: !!el?.getAttribute('onclick'), d };
+}, [wid, day]);
+
+test('Табель: бригадир видит все бригады, а отмечает только свою', async () => {
+    const page = await openApp({ role: 'worker' });
+    await openTimesheet(page, { id: 'u5', full_name: 'Данияр', role: 'worker', staff_role: 'brigadier', brigade: 'Данияр' });
+    const own = await tsCell(page, 'w1', 3), other = await tsCell(page, 'w2', 3);
+    expect(own.exists && other.exists, 'видны не все бригады');
+    expect(own.clickable && !other.clickable, 'отмечать можно не только свою бригаду: ' + JSON.stringify({ own, other }));
+    await page.evaluate(d => { document.querySelector(`[data-ts-cell="w1_${d}"]`).click(); }, own.d);
+    await page.waitForFunction(() => __db.timesheet_entries.length === 1);
+    await page.evaluate(d => toggleTimesheetCell('p1', 'w2', d), other.d);
+    expect(await page.evaluate(() => __db.timesheet_entries.map(e => e.worker_id).join()) === 'w1', 'отметилась чужая бригада');
+    // Добавить в табель можно только людей своей бригады, новый сотрудник — сразу в свою бригаду.
+    const opts = await page.$$eval('#timesheetAddWorkerSelect option', o => o.map(x => x.value).filter(Boolean));
+    expect(JSON.stringify(opts) === '["w3"]', 'в списке «добавить» чужие люди: ' + JSON.stringify(opts));
+    expect(await page.$eval('#timesheetNewWorkerGroup', i => i.readOnly && i.value === 'Данияр'), 'бригада нового сотрудника не своя');
+    expect(/только свою бригаду «Данияр»/.test(await page.$eval('#timesheetBrigadeNote', e => e.innerText)), 'нет подсказки про свою бригаду');
+    // Меню «Ещё» сотрудникам и бригадирам не показывается.
+    expect(!(await visible(page, '#navMoreBtn')), 'у сотрудника видно «Ещё»');
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
+test('Табель: сотрудник без бригады только смотрит, руководитель и прораб отмечают всех', async () => {
+    const worker = await openApp({ role: 'worker' });
+    await openTimesheet(worker, { id: 'u6', full_name: 'Новичок', role: 'worker', brigade: null });
+    expect(!(await tsCell(worker, 'w1', 3)).clickable && !(await tsCell(worker, 'w2', 3)).clickable, 'без бригады можно отмечать');
+    expect(!(await visible(worker, '#timesheetEditTools')), 'без бригады видно «Новый сотрудник»');
+    expect(/назначит вам бригаду/.test(await worker.$eval('#timesheetBrigadeNote', e => e.innerText)), 'нет объяснения, почему нельзя отмечать');
+    for (const [role, profile] of [['manager', { id: 'u1', full_name: 'Грег', role: 'manager' }], ['lead', { id: 'u7', full_name: 'Прораб', role: 'lead', staff_role: 'foreman' }]]) {
+        const page = await openApp({ role });
+        await openTimesheet(page, profile);
+        expect((await tsCell(page, 'w1', 3)).clickable && (await tsCell(page, 'w2', 3)).clickable, role + ' не может отмечать все бригады');
+        expect(await visible(page, '#navMoreBtn'), role + ': нет меню «Ещё»');
+        expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+    }
+    expect(!worker.errors.length, 'ошибки на странице: ' + worker.errors.join('; '));
+});
+
+test('Свои списки работ: у сотрудника свой, руководитель открывает список любого', async () => {
+    const tasks = [
+        { id: 'g1', project_id: 'p1', title: 'Работа Грега', category: 'Участок 1', status: 'new', progress: 0, owner_id: null },
+        { id: 'd1', project_id: 'p1', title: 'Работа Данияра', category: 'Участок 1', status: 'new', progress: 0, owner_id: 'u5' },
+        { id: 'r1', project_id: 'p1', title: 'Работа Руслана', category: 'Участок 2', status: 'new', progress: 0, owner_id: 'u8' }];
+    const people = [{ id: 'u1', full_name: 'Грег', role: 'manager' }, { id: 'u5', full_name: 'Данияр', role: 'worker', staff_role: 'brigadier', brigade: 'Данияр' },
+        { id: 'u8', full_name: 'Руслан', role: 'lead', staff_role: 'foreman' }, { id: 'u9', full_name: 'Заказчик', role: 'customer' }];
+    const shown = page => page.evaluate(() => [...document.querySelectorAll('#tasksContainer')].map(e => e.innerText).join(' '));
+    const open = async (role, me) => {
+        const page = await openApp({ role });
+        await page.evaluate(async ({ tasks, people, me }) => {
+            __db.tasks = tasks.map(t => ({ ...t })); __db.profiles = people;
+            currentUserProfile = people.find(p => p.id === me);
+            appData.currentProjectId = 'p1';
+            await refreshAllData();
+            await openProject('p1');
+        }, { tasks, people, me });
+        return page;
+    };
+    // Бригадир видит только свой список; новая работа — в его список.
+    const dan = await open('worker', 'u5');
+    let text = await shown(dan);
+    expect(/Работа Данияра/.test(text) && !/Работа Грега/.test(text) && !/Работа Руслана/.test(text), 'бригадир видит чужие работы: ' + text);
+    expect(!(await visible(dan, '#taskDeskWrap')), 'бригадиру виден выбор чужих списков');
+    await dan.evaluate(async () => {
+        openAddTaskModal();
+        document.getElementById('taskTitle').value = 'Новая работа бригадира';
+        await saveTask(new Event('submit'));
+    });
+    await dan.waitForFunction(() => __db.tasks.some(t => t.title === 'Новая работа бригадира'));
+    expect(await dan.evaluate(() => __db.tasks.find(t => t.title === 'Новая работа бригадира').owner_id) === 'u5', 'новая работа бригадира не в его списке');
+    // Руководитель: свой список как раньше, выбор людей с должностями, в чужом списке работает как в своём.
+    const greg = await open('manager', 'u1');
+    text = await shown(greg);
+    expect(/Работа Грега/.test(text) && !/Работа Данияра/.test(text), 'список руководителя не свой: ' + text);
+    const opts = await greg.$$eval('#taskDeskSelect option', o => o.map(x => x.textContent.trim()));
+    expect(opts[0] === 'Мой список работ' && opts.some(o => /Руслан · Прораб/.test(o)) && opts.some(o => /Данияр · Бригадир/.test(o)) && !opts.some(o => /Заказчик/.test(o)),
+        'выбор списков: ' + JSON.stringify(opts));
+    await greg.selectOption('#taskDeskSelect', 'u5');
+    text = await shown(greg);
+    expect(/Работа Данияра/.test(text) && !/Работа Грега/.test(text), 'в списке Данияра не его работы: ' + text);
+    expect(await visible(greg, '#taskDeskBanner') && /Данияр · Бригадир/.test(await greg.$eval('#taskDeskBanner', e => e.innerText)), 'не видно, чей список открыт');
+    await greg.evaluate(async () => {
+        openAddTaskModal();
+        document.getElementById('taskTitle').value = 'Задание от Грега';
+        await saveTask(new Event('submit'));
+    });
+    await greg.waitForFunction(() => __db.tasks.some(t => t.title === 'Задание от Грега'));
+    expect(await greg.evaluate(() => __db.tasks.find(t => t.title === 'Задание от Грега').owner_id) === 'u5', 'работа из чужого списка ушла не туда');
+    await greg.click('#taskDeskBanner button');
+    text = await shown(greg);
+    expect(/Работа Грега/.test(text) && !/Задание от Грега/.test(text), 'не вернулся к своему списку: ' + text);
+    expect(!dan.errors.length && !greg.errors.length, 'ошибки на странице: ' + dan.errors.concat(greg.errors).join('; '));
+});
+
+test('Пользователи и роли: Бригадир и Прораб, бригада для табеля', async () => {
+    const page = await openApp();
+    await page.evaluate(async () => {
+        __db.profiles = [{ id: 'u5', full_name: 'Данияр', email: 'd@x.ru', role: 'worker' }, { id: 'u8', full_name: 'Руслан', email: 'r@x.ru', role: 'worker' }];
+        __db.project_members = [];
+        appData.workers = [{ id: 'w1', name: 'Иванов', groupName: 'Данияр' }, { id: 'w2', name: 'Петров', groupName: 'Руслан' }];
+        await openUsersModal();
+    });
+    const roles = await page.$$eval('[data-user-role="u5"] option', o => o.map(x => x.textContent.trim()));
+    expect(roles.includes('Бригадир') && roles.includes('Прораб'), 'нет должностей: ' + JSON.stringify(roles));
+    await page.selectOption('[data-user-role="u5"]', 'brigadier');
+    await page.waitForFunction(() => __db.profiles[0].staff_role === 'brigadier');
+    await page.selectOption('[data-user-brigade="u5"]', 'Данияр');
+    await page.waitForFunction(() => __db.profiles[0].brigade === 'Данияр');
+    await page.selectOption('[data-user-role="u8"]', 'foreman');
+    await page.waitForFunction(() => __db.profiles[1].staff_role === 'foreman');
+    const p = await page.evaluate(() => __db.profiles.map(x => [x.role, x.staff_role, x.brigade || null]));
+    expect(JSON.stringify(p) === JSON.stringify([['worker', 'brigadier', 'Данияр'], ['lead', 'foreman', null]]), 'в базе: ' + JSON.stringify(p));
+    expect(!(await page.$('[data-user-brigade="u8"]')), 'у прораба выбор бригады (он отмечает все)');
+    // Обратно в «Сотрудник» — должность снимается.
+    await page.selectOption('[data-user-role="u5"]', 'worker');
+    await page.waitForFunction(() => __db.profiles[0].staff_role === null);
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
 test('План-график: составляется из объёмов по нормам выработки', async () => {
     const page = await openApp({ admin: true });
     await page.evaluate(() => showVolumesScreen());
