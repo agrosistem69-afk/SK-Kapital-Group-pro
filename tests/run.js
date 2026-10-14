@@ -466,6 +466,7 @@ test('Замечания: рисую прямоугольник и стрелк�
     await openNotes(page);
     const shown = await page.evaluate(() => document.querySelectorAll('#notesMarks [data-note]').length);
     expect(shown === 2, 'после повторного открытия видно пометок: ' + shown);
+    await page.click('#notesListBtn');
     expect(/Переложить плитку/.test(await page.$eval('#notesList', el => el.innerText)), 'в списке нет подписи замечания');
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
@@ -589,6 +590,7 @@ test('Замечания: скачать в PDF — лист с планом и 
 test('Замечания на телефоне: рисуется пальцем, список под планом', async () => {
     const page = await openApp({ width: 390, height: 800 });
     await openNotes(page);
+    await page.click('#notesListBtn');
     const box = await page.$eval('#notesSvg', el => { const r = el.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; });
     expect(box[2] > 300 && box[3] > 250, 'план на телефоне слишком маленький: ' + JSON.stringify(box));
     const listTop = await page.$eval('#notesList', el => el.getBoundingClientRect().top);
@@ -599,6 +601,74 @@ test('Замечания на телефоне: рисуется пальцем,
     const vb = await page.evaluate(() => notesState.vb);
     await notesDrag(page, [vb[0] + vb[2] * 0.3, vb[1] + vb[3] * 0.5], [vb[0] + vb[2] * 0.6, vb[1] + vb[3] * 0.55]);
     await page.waitForFunction(() => __db.drawing_notes?.length === 1 && __db.drawing_notes[0].kind === 'pen');
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
+test('Замечания: список скрыт, пока не открыть; фильтр по автору', async () => {
+    const page = await openApp();
+    await page.evaluate(() => __db.drawing_notes = [
+        { id: 'n1', project_id: 'p1', sheet: 'лист 1 тестовый посадочный план', author_id: 'u2', author_name: 'Прораб', kind: 'rect', color: '#dc2626', data: { x: 0, y: 0, w: 5, h: 5 }, text: 'Бордюр', resolved: false, created_at: '2026-10-14T05:00:00Z' },
+        { id: 'n2', project_id: 'p1', sheet: 'лист 1 тестовый посадочный план', author_id: 'u1', author_name: 'Грег', kind: 'ellipse', color: '#2563eb', data: { x: 10, y: 10, w: 5, h: 5 }, text: 'Плитка', resolved: false, created_at: '2026-10-14T06:00:00Z' }]);
+    await openNotes(page);
+    expect(!(await visible(page, '#notesList')), 'список замечаний виден сразу, а должен быть скрыт');
+    expect(await page.evaluate(() => document.querySelectorAll('#notesMarks [data-note]').length) === 2, 'на плане не все пометки');
+    await page.click('#notesListBtn');
+    let text = await page.$eval('#notesList', el => el.innerText);
+    expect(await visible(page, '#notesList') && /Бордюр/.test(text) && /Плитка/.test(text), 'список не открылся: ' + text);
+    const opts = await page.$$eval('#notesAuthor option', o => o.map(x => x.textContent.trim()));
+    expect(JSON.stringify(opts) === JSON.stringify(['Все авторы', 'Грег (я)', 'Прораб']), 'авторы в фильтре: ' + JSON.stringify(opts));
+    await page.selectOption('#notesAuthor', 'u2');
+    text = await page.$eval('#notesList', el => el.innerText);
+    const ids = await page.evaluate(() => [...document.querySelectorAll('#notesMarks [data-note]')].map(e => e.dataset.note));
+    expect(JSON.stringify(ids) === '["n1"]' && /Бордюр/.test(text) && !/Плитка/.test(text), 'фильтр по автору не сработал: ' + JSON.stringify(ids) + ' ' + text);
+    await page.click('#notesList button[title="Скрыть список"]');
+    expect(!(await visible(page, '#notesList')), 'список не скрылся');
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
+test('Замечания: после рисования снова стрелка, растягивание за любую сторону рамки', async () => {
+    const page = await openApp({ width: 390, height: 800 });
+    await openNotes(page);
+    const vb = await page.evaluate(() => notesState.vb);
+    const P = (fx, fy) => [vb[0] + vb[2] * fx, vb[1] + vb[3] * fy];
+    const W = vb[2], H = vb[3], tol = W * 0.01;
+    const note = kind => page.evaluate(k => JSON.parse(JSON.stringify(__db.drawing_notes.find(n => n.kind === k))), kind);
+    await page.click('#notesToolbar [data-tool="rect"]');
+    await notesDrag(page, P(0.3, 0.3), P(0.6, 0.5));
+    await page.waitForFunction(() => __db.drawing_notes.length === 1);
+    expect(await page.evaluate(() => notesState.tool) === 'pan', 'после рисования инструмент не вернулся на стрелку');
+    // Палец по пустому месту двигает план, а не рисует новую фигуру.
+    await notesDrag(page, P(0.8, 0.8), P(0.7, 0.75));
+    expect(await page.evaluate(() => __db.drawing_notes.length) === 1, 'второе касание нарисовало новую фигуру');
+    // Ручки по всему периметру: 4 угла и 4 середины сторон.
+    const hs = await page.evaluate(() => [...new Set([...document.querySelectorAll('#notesDraft [data-handle]')].map(e => e.dataset.handle))].sort());
+    expect(JSON.stringify(hs) === JSON.stringify(['e', 'n', 'ne', 'nw', 's', 'se', 'sw', 'w']), 'ручки рамки: ' + JSON.stringify(hs));
+    // Тяну левую сторону рамки (не угол, а место на трети высоты) — меняется только ширина.
+    const r0 = await note('rect');
+    const k = await page.evaluate(() => notesUnitsPerPx());
+    await notesDrag(page, [r0.data.x - 10 * k, r0.data.y + r0.data.h / 3], [r0.data.x - W * 0.1, r0.data.y + r0.data.h / 3]);
+    const r1 = await note('rect');
+    expect(near(r1.data.x + r1.data.w, r0.data.x + r0.data.w, tol) && r1.data.w > r0.data.w + W * 0.07 && near(r1.data.h, r0.data.h, tol) && near(r1.data.y, r0.data.y, tol),
+        'левая сторона не растянулась: ' + JSON.stringify([r0.data, r1.data]));
+    // Нижняя середина — меняется только высота.
+    const s = await page.evaluate(() => { const r = document.querySelector('#notesDraft g[data-handle="s"]').getBBox(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+    await notesDrag(page, s, [s[0], s[1] + H * 0.1]);
+    const r2 = await note('rect');
+    expect(r2.data.h > r1.data.h + H * 0.07 && near(r2.data.w, r1.data.w, tol), 'низ не растянулся: ' + JSON.stringify([r1.data, r2.data]));
+    // Подпись: после неё тоже стрелка; увеличиваю за левую ручку — правый край стоит на месте.
+    page.once('dialog', d => d.accept('Проверить'));
+    await page.click('#notesToolbar [data-tool="text"]');
+    const [tx, ty] = await notesToScreen(page, ...P(0.4, 0.8));
+    await page.mouse.click(tx, ty);
+    await page.waitForFunction(() => __db.drawing_notes.length === 2);
+    expect(await page.evaluate(() => notesState.tool) === 'pan', 'после подписи инструмент не вернулся на стрелку');
+    const b0 = await page.evaluate(() => { const t = notesState.marks.find(m => m.kind === 'text'); return noteBox(t); });
+    const t0 = await note('text');
+    const w = await page.evaluate(() => { const r = document.querySelector('#notesDraft g[data-handle="w"]').getBBox(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+    await notesDrag(page, w, [w[0] - (b0[2] - b0[0]), w[1]]);
+    const t1 = await note('text');
+    const b1 = await page.evaluate(() => { const t = notesState.marks.find(m => m.kind === 'text'); return noteBox(t); });
+    expect(t1.data.size > t0.data.size * 1.6 && near(b1[2], b0[2], (b0[2] - b0[0]) * 0.1), 'подпись не увеличилась за левую сторону: ' + JSON.stringify([t0.data, t1.data, b0, b1]));
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 

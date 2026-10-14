@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '32';
+        window.APP_VERSION = '33';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=32">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=32">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=32">
+    <link rel="stylesheet" href="vendor/app.css?v=33">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=33">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=33">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=32" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=32" defer></script>
-    <script src="vendor/jszip.min.js?v=32" defer></script>
+    <script src="vendor/html2canvas.min.js?v=33" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=33" defer></script>
+    <script src="vendor/jszip.min.js?v=33" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=32"></script>
+    <script src="vendor/supabase.js?v=33"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -1732,7 +1732,7 @@
                         </div>
                     </div>
                 </div>
-                <aside id="notesList" class="w-full md:w-80 max-h-[38vh] md:max-h-none overflow-y-auto border-t md:border-t-0 md:border-l border-slate-200 p-3 bg-white"></aside>
+                <aside id="notesList" class="hidden w-full md:w-80 max-h-[38vh] md:max-h-none overflow-y-auto border-t md:border-t-0 md:border-l border-slate-200 p-3 bg-white"></aside>
             </div>
             <div id="drawingViewerWatermark" class="absolute inset-0 pointer-events-none overflow-hidden select-none"></div>
         </div>
@@ -8688,11 +8688,12 @@
         const NOTE_FONT_SIZES = [['s', 'Мелкий', 0.007], ['m', 'Средний', 0.011], ['l', 'Крупный', 0.017], ['xl', 'Очень крупный', 0.026]];
         const NOTE_TOOLS = [['pan', 'fa-arrow-pointer', 'Выбрать, двигать и растягивать'], ['rect', 'fa-square', 'Прямоугольник'], ['ellipse', 'fa-circle', 'Круг'],
             ['arrow', 'fa-arrow-right-long', 'Стрелка'], ['pen', 'fa-pen', 'Линия от руки'], ['text', 'fa-font', 'Подпись']];
-        let notesState = null, notesPointerReady = false;
+        // Список замечаний скрыт, пока его не откроют кнопкой «Список» (выбор запоминается до закрытия приложения).
+        let notesState = null, notesPointerReady = false, notesListOpen = false;
 
         function notesReset(drawing) {
             notesState = drawing ? { drawing, projectId: drawing.project_id, sheet: normName(drawing.sheet), html: null, plan: null, vb: null, baseVb: null,
-                tool: 'pan', color: NOTE_COLORS[0], font: 'm', marks: [], draft: null, selected: null, open: false, error: '' } : null;
+                tool: 'pan', color: NOTE_COLORS[0], font: 'm', marks: [], draft: null, selected: null, open: false, error: '', author: '' } : null;
             document.getElementById('notesStage').classList.add('hidden');
             document.getElementById('notesStage').classList.remove('flex');
             document.getElementById('drawingViewerFrame').classList.remove('hidden');
@@ -8701,6 +8702,20 @@
         }
         const notesMyId = () => currentUserProfile?.id || null;
         const notesCanEdit = m => !!m && (m.author_id === notesMyId() || canManageDrawings);
+        // Пометки, которые сейчас показаны: все или только выбранного автора.
+        const notesVisible = () => notesState.marks.filter(m => !notesState.author || m.author_id === notesState.author);
+        function notesAuthors() {
+            const seen = new Map();
+            notesState.marks.forEach(m => { if (m.author_id && !seen.has(m.author_id)) seen.set(m.author_id, m.author_name || 'Без имени'); });
+            return [...seen].sort((a, b) => (b[0] === notesMyId()) - (a[0] === notesMyId()) || a[1].localeCompare(b[1], 'ru'));
+        }
+        function notesSetAuthor(id) {
+            const st = notesState;
+            st.author = id;
+            if (!notesVisible().some(m => m.id === st.selected)) st.selected = null;
+            notesRender();
+        }
+        function notesToggleList() { notesListOpen = !notesListOpen; notesRender(); }
 
         async function toggleDrawingNotes() {
             const st = notesState;
@@ -8805,13 +8820,14 @@
             const st = notesState;
             if (!st?.vb) return;
             const k = notesUnitsPerPx();
-            document.getElementById('notesMarks').innerHTML = st.marks.map(m => noteShapeSvg(m, k, m.id === st.selected)).join('');
+            document.getElementById('notesMarks').innerHTML = notesVisible().map(m => noteShapeSvg(m, k, m.id === st.selected)).join('');
             let draft = st.draft ? noteShapeSvg(st.draft, k) : '';
             const sel = st.marks.find(m => m.id === st.selected);
             if (sel && notesCanEdit(sel) && !st.draft) draft += notesHandlesSvg(sel, k);
             document.getElementById('notesDraft').innerHTML = draft;
         }
-        // Ручки выделенной пометки: углы рамки (фигура, линия, подпись) или концы стрелки.
+        // Ручки выделенной пометки: по всему периметру рамки (углы и середины сторон, а сами стороны тоже тянутся)
+        // или концы стрелки. Подпись за любую ручку увеличивается целиком.
         function noteBox(m) {
             if (m.kind === 'text') {
                 const el = document.querySelector(`#notesMarks [data-note="${CSS.escape(m.id)}"] text`);
@@ -8821,16 +8837,25 @@
         }
         function notesHandles(m) {
             if (m.kind === 'arrow') return [['p0', ...m.data.pts[0]], ['p1', ...m.data.pts[1]]];
-            const [x0, y0, x1, y1] = noteBox(m);
-            if (m.kind === 'text') return [['se', x1, y1]];
-            return [['nw', x0, y0], ['ne', x1, y0], ['sw', x0, y1], ['se', x1, y1]];
+            const [x0, y0, x1, y1] = noteBox(m), xm = (x0 + x1) / 2, ym = (y0 + y1) / 2;
+            return [['n', xm, y0], ['s', xm, y1], ['w', x0, ym], ['e', x1, ym], ['nw', x0, y0], ['ne', x1, y0], ['sw', x0, y1], ['se', x1, y1]];
         }
+        const NOTE_HANDLE_CURSOR = { nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize', n: 'ns-resize', s: 'ns-resize', w: 'ew-resize', e: 'ew-resize' };
         function notesHandlesSvg(m, k) {
-            const r = 7 * k, [x0, y0, x1, y1] = noteBox(m), pad = 6 * k;
-            const frame = m.kind === 'arrow' ? '' : `<rect x="${x0 - pad}" y="${y0 - pad}" width="${x1 - x0 + 2 * pad}" height="${y1 - y0 + 2 * pad}" fill="none" stroke="#2563eb" stroke-width="${1.2 * k}" stroke-dasharray="${5 * k} ${4 * k}" pointer-events="none"/>`;
-            return frame + notesHandles(m).map(([h, x, y]) => {
-                return `<rect data-handle="${h}" x="${x - r}" y="${y - r}" width="${2 * r}" height="${2 * r}" rx="${2 * k}" fill="#fff" stroke="#2563eb" stroke-width="${2 * k}" style="cursor:${h === 'nw' || h === 'se' ? 'nwse-resize' : h === 'ne' || h === 'sw' ? 'nesw-resize' : 'move'}"/>`;
-            }).join('');
+            const [x0, y0, x1, y1] = noteBox(m), pad = 6 * k, out = 12 * k;
+            if (m.kind === 'arrow') return notesHandles(m).map(([h, x, y]) => noteHandleSvg(h, x, y, k)).join('');
+            const fx0 = x0 - pad, fy0 = y0 - pad, fx1 = x1 + pad, fy1 = y1 + pad;
+            const frame = `<rect x="${fx0}" y="${fy0}" width="${fx1 - fx0}" height="${fy1 - fy0}" fill="none" stroke="#2563eb" stroke-width="${1.2 * k}" stroke-dasharray="${5 * k} ${4 * k}" pointer-events="none"/>`;
+            // Полосы вдоль сторон рамки: тянуть можно за любое место стороны, внутрь фигуры они не заходят (там — сдвиг).
+            const strip = (h, x, y, w, hh) => `<rect data-handle="${h}" x="${x}" y="${y}" width="${w}" height="${hh}" fill="transparent" style="cursor:${NOTE_HANDLE_CURSOR[h]}"/>`;
+            const strips = strip('n', fx0, fy0 - out, fx1 - fx0, out + pad) + strip('s', fx0, y1, fx1 - fx0, out + pad)
+                + strip('w', fx0 - out, fy0, out + pad, fy1 - fy0) + strip('e', x1, fy0, out + pad, fy1 - fy0);
+            return frame + strips + notesHandles(m).map(([h, x, y]) => noteHandleSvg(h, x + (h.includes('w') ? -pad : h.includes('e') ? pad : 0), y + (h.includes('n') ? -pad : h.includes('s') ? pad : 0), k)).join('');
+        }
+        // Ручка: видимый квадратик и вокруг него невидимая зона побольше — под палец.
+        function noteHandleSvg(h, x, y, k) {
+            const r = (h.length === 1 ? 5 : 7) * k, hit = 16 * k;
+            return `<g data-handle="${h}" style="cursor:${NOTE_HANDLE_CURSOR[h] || 'move'}"><rect x="${x - hit}" y="${y - hit}" width="${2 * hit}" height="${2 * hit}" fill="transparent"/><rect x="${x - r}" y="${y - r}" width="${2 * r}" height="${2 * r}" rx="${2 * k}" fill="#fff" stroke="#2563eb" stroke-width="${2 * k}"/></g>`;
         }
         // Новое положение пометки после перетаскивания: сдвиг целиком или растяжение за ручку.
         function noteMoved(orig, dx, dy) {
@@ -8841,14 +8866,21 @@
         function noteResized(orig, box, h, p) {
             const d = JSON.parse(JSON.stringify(orig.data));
             if (orig.kind === 'arrow') { d.pts[h === 'p0' ? 0 : 1] = p; return d; }
+            const hx = h.includes('w') ? 'w' : h.includes('e') ? 'e' : '', hy = h.includes('n') ? 'n' : h.includes('s') ? 's' : '';
             if (orig.kind === 'text') {
-                const w0 = Math.max(box[2] - box[0], 1e-6), w1 = Math.max(p[0] - box[0], w0 * 0.15);
-                d.size = Math.round(orig.data.size * (w1 / w0) * 1000) / 1000;
-                return d;
+                // Подпись растёт целиком; противоположная сторона (или угол) стоит на месте.
+                const w0 = Math.max(box[2] - box[0], 1e-6), h0 = Math.max(box[3] - box[1], 1e-6);
+                let s = hx === 'e' ? (p[0] - box[0]) / w0 : hx === 'w' ? (box[2] - p[0]) / w0 : hy === 's' ? (p[1] - box[1]) / h0 : (box[3] - p[1]) / h0;
+                s = Math.max(s, 0.15);
+                const nx0 = hx === 'w' ? box[2] - w0 * s : hx === 'e' ? box[0] : (box[0] + box[2]) / 2 - w0 * s / 2;
+                const ny0 = hy === 'n' ? box[3] - h0 * s : hy === 's' ? box[1] : (box[1] + box[3]) / 2 - h0 * s / 2;
+                const r3 = v => Math.round(v * 1000) / 1000;
+                return { x: r3(nx0 + (orig.data.x - box[0]) * s), y: r3(ny0 + (orig.data.y - box[1]) * s), size: r3(orig.data.size * s) };
             }
-            // Противоположный угол стоит на месте.
-            const fx = h.includes('w') ? box[2] : box[0], fy = h.includes('n') ? box[3] : box[1];
-            const nb = [Math.min(fx, p[0]), Math.min(fy, p[1]), Math.max(fx, p[0]), Math.max(fy, p[1])];
+            // Противоположная сторона стоит на месте; ручка на середине стороны меняет только один размер.
+            const nb = box.slice();
+            if (hx) { const fx = hx === 'w' ? box[2] : box[0]; nb[0] = Math.min(fx, p[0]); nb[2] = Math.max(fx, p[0]); }
+            if (hy) { const fy = hy === 'n' ? box[3] : box[1]; nb[1] = Math.min(fy, p[1]); nb[3] = Math.max(fy, p[1]); }
             if (orig.kind === 'pen') {
                 const sx = (nb[2] - nb[0]) / Math.max(box[2] - box[0], 1e-6), sy = (nb[3] - nb[1]) / Math.max(box[3] - box[1], 1e-6);
                 d.pts = d.pts.map(([x, y]) => [nb[0] + (x - box[0]) * sx, nb[1] + (y - box[1]) * sy]);
@@ -8870,6 +8902,12 @@
                 <select id="notesFont" onchange="notesSetFont(this.value)" title="Размер подписи" class="h-9 flex-shrink-0 border border-slate-300 rounded-lg px-2 text-sm bg-white">
                     ${NOTE_FONT_SIZES.map(([v, n]) => `<option value="${v}" ${notesCurrentFont() === v ? 'selected' : ''}>Aa ${n}</option>`).join('')}
                 </select>
+                <span class="w-px h-6 bg-slate-300 mx-1 flex-shrink-0"></span>
+                <select id="notesAuthor" onchange="notesSetAuthor(this.value)" title="Чьи замечания показывать" class="h-9 max-w-[11rem] flex-shrink-0 border border-slate-300 rounded-lg px-2 text-sm bg-white">
+                    <option value="">Все авторы</option>
+                    ${notesAuthors().map(([id, n]) => `<option value="${escapeHtml(id)}" ${st.author === id ? 'selected' : ''}>${escapeHtml(n)}${id === notesMyId() ? ' (я)' : ''}</option>`).join('')}
+                </select>
+                <button id="notesListBtn" onclick="notesToggleList()" title="${notesListOpen ? 'Скрыть список замечаний' : 'Показать список замечаний'}" class="h-9 px-3 flex-shrink-0 rounded-lg text-sm font-semibold whitespace-nowrap ${notesListOpen ? 'bg-brand-600 text-white' : 'text-slate-700 hover:bg-slate-200'}"><i class="fa-solid fa-list mr-1"></i>Список ${notesVisible().length}</button>
                 <span class="w-px h-6 bg-slate-300 mx-1 flex-shrink-0"></span>
                 <button onclick="notesUndo()" title="Отменить мою последнюю пометку" class="w-9 h-9 flex-shrink-0 rounded-lg text-slate-700 hover:bg-slate-200"><i class="fa-solid fa-rotate-left"></i></button>
                 <button onclick="notesExportJpeg()" title="Скачать картинкой (JPEG)" class="h-9 px-3 flex-shrink-0 rounded-lg text-slate-700 hover:bg-slate-200 text-sm font-semibold whitespace-nowrap"><i class="fa-solid fa-image mr-1"></i>JPEG</button>
@@ -8900,32 +8938,41 @@
             notesRender();
         }
 
+        // Справа (на телефоне — под планом): весь список, если его открыли, иначе только карточка выделенной пометки
+        // (подпись, «Исправлено», «Удалить»). Ничего не выделено и список закрыт — панели нет, план во весь экран.
         function notesRenderList() {
             const st = notesState, el = document.getElementById('notesList');
-            const kindName = { rect: 'Прямоугольник', ellipse: 'Круг', arrow: 'Стрелка', pen: 'Линия', text: 'Подпись' };
-            const open = st.marks.filter(m => !m.resolved).length;
+            const marks = notesVisible(), sel = marks.find(m => m.id === st.selected);
+            const show = notesListOpen || !!sel || !!st.error;
+            el.classList.toggle('hidden', !show);
+            if (!show) { el.innerHTML = ''; return; }
+            const open = marks.filter(m => !m.resolved).length;
+            const who = st.author ? (notesAuthors().find(a => a[0] === st.author)?.[1] || '') : '';
             el.innerHTML = `
-                <div class="flex items-center justify-between mb-2">
-                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide">Замечания: ${st.marks.length}${st.marks.length ? `, открытых ${open}` : ''}</h4>
-                </div>
+                ${notesListOpen ? `<div class="flex items-center justify-between mb-2 gap-2">
+                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide">Замечания${who ? ' · ' + escapeHtml(who) : ''}: ${marks.length}${marks.length ? `, открытых ${open}` : ''}</h4>
+                    <button onclick="notesToggleList()" title="Скрыть список" class="w-7 h-7 flex-shrink-0 rounded-lg text-slate-500 hover:bg-slate-100"><i class="fa-solid fa-xmark"></i></button>
+                </div>` : ''}
                 ${st.error ? `<div class="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mb-2">${escapeHtml(st.error)}</div>` : ''}
-                ${st.marks.length ? '' : '<div class="text-sm text-slate-400">Выберите инструмент сверху и нарисуйте на плане. Пометку видят все участники проекта.</div>'}
-                <div class="space-y-1.5">${st.marks.slice().reverse().map(m => {
-                    const sel = m.id === st.selected, mine = notesCanEdit(m);
-                    return `<div data-note-row="${escapeHtml(m.id)}" class="border rounded-lg p-2 text-sm ${sel ? 'border-brand-500 bg-brand-50' : 'border-slate-200'} ${m.resolved ? 'opacity-60' : ''}">
-                        <button onclick="notesSelect('${escapeHtml(m.id)}', true)" class="w-full text-left flex items-start gap-2">
-                            <span class="w-3 h-3 rounded-full mt-1 flex-shrink-0" style="background:${escapeHtml(m.color)}"></span>
-                            <span class="min-w-0 flex-1"><span class="font-semibold text-slate-800">${m.resolved ? '✓ ' : ''}${escapeHtml(m.text || kindName[m.kind] || 'Пометка')}</span>
-                            <span class="block text-[11px] text-slate-400">${escapeHtml(m.author_name || '')} · ${m.created_at ? new Date(m.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</span></span>
-                        </button>
-                        ${sel ? `<div class="mt-2 space-y-2">
-                            ${m.author_id === notesMyId() ? `<input id="noteTextInput" value="${escapeHtml(m.text || '')}" placeholder="${m.kind === 'text' ? 'Текст подписи' : 'Комментарий к пометке'}" onchange="notesSetText('${escapeHtml(m.id)}', this.value)" class="w-full px-2 py-1.5 border border-slate-300 rounded text-sm">` : ''}
-                            <div class="flex gap-2">
-                                ${mine ? `<button onclick="notesToggleResolved('${escapeHtml(m.id)}')" class="flex-1 text-xs font-semibold px-2 py-1.5 rounded border ${m.resolved ? 'border-slate-300 text-slate-600' : 'border-emerald-300 text-emerald-700 bg-emerald-50'}">${m.resolved ? 'Вернуть в работу' : 'Исправлено'}</button>
-                                <button onclick="notesDelete('${escapeHtml(m.id)}')" class="text-xs font-semibold px-2 py-1.5 rounded border border-rose-200 text-rose-600">Удалить</button>` : '<span class="text-[11px] text-slate-400">Изменить может автор или ответственный за чертежи.</span>'}
-                            </div></div>` : ''}
-                    </div>`;
-                }).join('')}</div>`;
+                ${notesListOpen && !marks.length ? `<div class="text-sm text-slate-400">${st.author ? 'У этого автора замечаний нет.' : 'Выберите инструмент сверху и нарисуйте на плане. Пометку видят все участники проекта.'}</div>` : ''}
+                <div class="space-y-1.5">${(notesListOpen ? marks.slice().reverse() : sel ? [sel] : []).map(notesRowHtml).join('')}</div>`;
+        }
+        function notesRowHtml(m) {
+            const st = notesState, kindName = { rect: 'Прямоугольник', ellipse: 'Круг', arrow: 'Стрелка', pen: 'Линия', text: 'Подпись' };
+            const sel = m.id === st.selected, mine = notesCanEdit(m);
+            return `<div data-note-row="${escapeHtml(m.id)}" class="border rounded-lg p-2 text-sm ${sel ? 'border-brand-500 bg-brand-50' : 'border-slate-200'} ${m.resolved ? 'opacity-60' : ''}">
+                <button onclick="notesSelect('${escapeHtml(m.id)}', true)" class="w-full text-left flex items-start gap-2">
+                    <span class="w-3 h-3 rounded-full mt-1 flex-shrink-0" style="background:${escapeHtml(m.color)}"></span>
+                    <span class="min-w-0 flex-1"><span class="font-semibold text-slate-800">${m.resolved ? '✓ ' : ''}${escapeHtml(m.text || kindName[m.kind] || 'Пометка')}</span>
+                    <span class="block text-[11px] text-slate-400">${escapeHtml(m.author_name || '')} · ${m.created_at ? new Date(m.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</span></span>
+                </button>
+                ${sel ? `<div class="mt-2 space-y-2">
+                    ${m.author_id === notesMyId() ? `<input id="noteTextInput" value="${escapeHtml(m.text || '')}" placeholder="${m.kind === 'text' ? 'Текст подписи' : 'Комментарий к пометке'}" onchange="notesSetText('${escapeHtml(m.id)}', this.value)" class="w-full px-2 py-1.5 border border-slate-300 rounded text-sm">` : ''}
+                    <div class="flex gap-2">
+                        ${mine ? `<button onclick="notesToggleResolved('${escapeHtml(m.id)}')" class="flex-1 text-xs font-semibold px-2 py-1.5 rounded border ${m.resolved ? 'border-slate-300 text-slate-600' : 'border-emerald-300 text-emerald-700 bg-emerald-50'}">${m.resolved ? 'Вернуть в работу' : 'Исправлено'}</button>
+                        <button onclick="notesDelete('${escapeHtml(m.id)}')" class="text-xs font-semibold px-2 py-1.5 rounded border border-rose-200 text-rose-600">Удалить</button>` : '<span class="text-[11px] text-slate-400">Изменить может автор или ответственный за чертежи.</span>'}
+                    </div></div>` : ''}
+            </div>`;
         }
         function notesSelect(id, zoom) {
             const st = notesState;
@@ -9048,6 +9095,8 @@
                             const d = dr.data;
                             dr.data = { x: Math.min(d.x, d.x + d.w), y: Math.min(d.y, d.y + d.h), w: Math.abs(d.w), h: Math.abs(d.h) };
                         }
+                        // Нарисовали — сразу обратно на стрелку: следующее касание двигает план или фигуру, а не рисует новую.
+                        st.tool = 'pan';
                         notesAdd(dr);
                     } else { notesRenderMarks(); if (done) notesPickAt(e); }
                 } else if ((g?.type === 'move' || g?.type === 'resize') && pointers.size === 0) {
@@ -9083,7 +9132,8 @@
         }
         function notesAddText(e) {
             const text = (prompt('Текст подписи') || '').trim();
-            if (!text) return;
+            notesState.tool = 'pan';
+            if (!text) { notesRender(); return; }
             const p = notesToPlan(e.clientX, e.clientY);
             notesAdd({ kind: 'text', color: notesState.color, text, data: { x: p[0], y: p[1], size: Math.round(notesFontSize(notesState.font) * 1000) / 1000 } });
         }
@@ -9109,7 +9159,7 @@
             const lim = Math.sqrt(16e6 / (W * H)); if (lim < 1) { W = Math.floor(W * lim); H = Math.floor(H * lim); }
             const f = Math.max(W, H) / 1600, k = vb[2] / W, foot = Math.round(56 * f);
             const style = `.st[stroke],.ln{fill:none;stroke-width:${0.9 * f * k}px}.ld .ln{stroke-width:${1 * f * k}px}.hb{fill:#fff;fill-opacity:.75;stroke:none}`;
-            const marks = st.marks.map(m => noteShapeSvg(m, k * f, false)).join('');
+            const marks = notesVisible().map(m => noteShapeSvg(m, k * f, false)).join('');
             const src = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="${vb.join(' ')}"><style>${style}</style><rect x="${vb[0]}" y="${vb[1]}" width="${vb[2]}" height="${vb[3]}" fill="#fff"/>${document.getElementById('notesPlan').innerHTML}${marks}</svg>`;
             const url = URL.createObjectURL(new Blob([src], { type: 'image/svg+xml' }));
             try {
