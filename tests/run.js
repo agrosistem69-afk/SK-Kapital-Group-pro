@@ -187,6 +187,25 @@ test('Без галочки «только внутри рамки» — пол�
     expect(m['Клен тестовый'] === 5 && m['Спирея тестовая'] === 300 && m['Газон рулонный тестовый'] === 120, 'ожидалось 5 / 300 / 120, получено ' + JSON.stringify(m));
 });
 
+test('Лист без плана (конструкции покрытий): объёмы слоёв идут в «Объёмы», «По зонам» не ломается', async () => {
+    // Как лист 7 «Конструкции дорожных одежд»: только таблица слоёв и список skkg-quantities, плана нет.
+    const html = `<!doctype html><h1>Конструкции</h1><script id="skkg-quantities" type="application/json">${JSON.stringify([
+        { pos: 'К1', name: 'Бетон В15 тестовый', unit: 'м³', qty: 952.04, category: 'Основания покрытий (слои)' },
+        { pos: 'К2', name: 'Плёнка тестовая', unit: 'м²', qty: 7736.51, category: 'Основания покрытий (слои)' },
+    ])}</script>`;
+    const page = await openApp({ admin: true });
+    await page.evaluate(h => { __files['p1/test-sheet.html'] = h; }, html);
+    await page.evaluate(() => showVolumesScreen());
+    await importFromDrawings(page);
+    const m = await materialsByName(page);
+    expect(m['Бетон В15 тестовый'] === 952.04 && m['Плёнка тестовая'] === 7736.51, 'слои не попали в объёмы: ' + JSON.stringify(m));
+    const cat = await page.evaluate(() => __db.materials.map(x => x.category));
+    expect(cat.every(c => c === 'Основания покрытий (слои)'), 'группа слоёв потерялась: ' + JSON.stringify(cat));
+    await page.click('text=По зонам');
+    await page.waitForFunction(() => /нет плана/.test(document.getElementById('zonesLoading').textContent), null, { timeout: 15000 });
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
 test('Поставка вручную уменьшает «Осталось»', async () => {
     const page = await openApp({ admin: true });
     await page.evaluate(() => showVolumesScreen());
