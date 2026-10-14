@@ -9,7 +9,8 @@
 
     function query(table) {
         const st = { filters: [], op: 'select', payload: null, opts: {} };
-        const match = r => st.filters.every(([c, v, op]) => op === 'in' ? v.includes(r[c]) : op === 'neq' ? r[c] !== v : r[c] === v);
+        const cmp = { in: (a, v) => v.includes(a), neq: (a, v) => a !== v, gte: (a, v) => a >= v, lte: (a, v) => a <= v, gt: (a, v) => a > v, lt: (a, v) => a < v };
+        const match = r => st.filters.every(([c, v, op]) => op ? cmp[op](r[c], v) : r[c] === v);
         const run = () => {
             const db = window.__db;
             db[table] = db[table] || [];
@@ -47,6 +48,8 @@
             eq(c, v) { st.filters.push([c, v]); return q; },
             neq(c, v) { st.filters.push([c, v, 'neq']); return q; },
             in(c, v) { st.filters.push([c, v, 'in']); return q; },
+            gte(c, v) { st.filters.push([c, v, 'gte']); return q; }, lte(c, v) { st.filters.push([c, v, 'lte']); return q; },
+            gt(c, v) { st.filters.push([c, v, 'gt']); return q; }, lt(c, v) { st.filters.push([c, v, 'lt']); return q; },
             insert(p) { st.op = 'insert'; st.payload = p; return q; },
             update(p) { st.op = 'update'; st.payload = p; return q; },
             upsert(p, o) { st.op = 'upsert'; st.payload = p; st.opts = o || {}; return q; },

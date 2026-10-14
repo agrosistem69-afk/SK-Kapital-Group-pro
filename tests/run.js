@@ -146,6 +146,38 @@ test('«Из чертежей» видно только тому, кто отв�
     expect(!(await visible(other, 'button:has-text("Из чертежей")')), 'кнопку «Из чертежей» видит не ответственный');
 });
 
+test('Загрузка листа: внутри проекта — только в этот проект, из общего меню — проект выбирают сами', async () => {
+    const page = await openApp({ admin: true });
+    page.on('dialog', d => d.dismiss());
+    await page.evaluate(() => { __db.projects.push({ id: 'p2', name: 'Ситибэй' }); appData.projects.push({ id: 'p2', name: 'Ситибэй' }); });
+    // Из общего меню: выбор проекта есть и пустой, пока не выберешь.
+    await page.click('#navDrawingsBtn');
+    await page.click('button:has-text("Загрузить лист")');
+    expect(await visible(page, '#drawingUploadProject'), 'из общего меню нет выбора проекта');
+    expect(await page.$eval('#drawingUploadProject', s => s.value === '' && s.required), 'проект подставлен заранее, а должен выбираться');
+    await page.selectOption('#drawingUploadProject', 'p2');
+    // Зашли в проект и оттуда в «Чертежи»: форма открывается заново, выбора нет, проект — текущий.
+    await page.evaluate(() => openProject('p1'));
+    await page.click('#navDrawingsBtn');
+    expect(!(await visible(page, '#drawingUploadForm')), 'осталась открытой форма от общего меню');
+    await page.click('button:has-text("Загрузить лист")');
+    expect(!(await visible(page, '#drawingUploadProject')), 'внутри проекта виден выбор проекта');
+    const fixed = await page.$eval('#drawingUploadProjectFixed', el => el.getClientRects().length ? el.innerText : '');
+    expect(fixed.includes('Тестовый проект'), 'не написано, в какой проект загрузится лист: ' + fixed);
+    await page.evaluate(() => { document.getElementById('drawingUploadProject').value = 'p2'; });
+    await page.fill('#drawingUploadSheet', 'Бортовые камни');
+    await page.setInputFiles('#drawingUploadFile', { name: 'b.html', mimeType: 'text/html', buffer: Buffer.from('<html></html>') });
+    await page.click('#drawingUploadBtn');
+    await page.waitForFunction(() => __db.drawings.some(d => d.sheet === 'Бортовые камни'));
+    const pid = await page.evaluate(() => __db.drawings.find(d => d.sheet === 'Бортовые камни').project_id);
+    expect(pid === 'p1', 'лист ушёл в другой проект: ' + pid);
+    // В разделе «Чертежи» внутри самого проекта — тоже без выбора.
+    await page.evaluate(() => openProject('p1'));
+    await page.evaluate(() => toggleDrawingUploadForm('project'));
+    expect(!(await visible(page, '#drawingUploadProject')) && await visible(page, '#drawingUploadProjectFixed'), 'в разделе проекта есть выбор проекта');
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
 test('Ведомость материалов читается из чертежа', async () => {
     const page = await openApp();
     const rows = await page.evaluate(html => extractDrawingQuantities(html).map(r => [r.pos, r.name, r.unit, r.qty]), SHEET_HTML);
