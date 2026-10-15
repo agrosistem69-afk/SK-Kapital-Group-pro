@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '38';
+        window.APP_VERSION = '39';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=38">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=38">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=38">
+    <link rel="stylesheet" href="vendor/app.css?v=39">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=39">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=39">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=38" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=38" defer></script>
-    <script src="vendor/jszip.min.js?v=38" defer></script>
+    <script src="vendor/html2canvas.min.js?v=39" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=39" defer></script>
+    <script src="vendor/jszip.min.js?v=39" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=38"></script>
+    <script src="vendor/supabase.js?v=39"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -2049,6 +2049,8 @@
         function roleLabel(role) {
             return { manager: 'Руководитель', lead: 'Руководство', worker: 'Сотрудник', customer: 'Заказчик', accountant: 'Бухгалтерия', pto: 'ПТО', brigadier: 'Бригадир', foreman: 'Прораб' }[role] || role;
         }
+        // Всё про бригады, должности и задания включается, только если в базе выполнен supabase/staff_roles.sql
+        // и assignments.sql (появляются поля staff_role, brigade, worker_id, owner_id). Без них — всё как раньше.
         // Должности «Бригадир» и «Прораб» хранятся отдельно (profiles.staff_role), а права берутся из обычной роли:
         // бригадир — как сотрудник (role = worker), прораб — как руководство объекта (role = lead).
         // Так все прежние правила доступа в базе работают для них без изменений.
@@ -10242,17 +10244,17 @@
                                 <div class="text-xs text-slate-500">${escapeHtml(p.email)}</div>
                             </div>
                             <select data-user-role="${p.id}" onchange="updateUserRole('${p.id}', this.value)" class="text-xs border border-slate-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500">
-                                ${['customer', 'worker', 'brigadier', 'foreman', 'lead', 'accountant', 'pto', 'manager'].map(k => `<option value="${k}" ${profileRoleKey(p) === k ? 'selected' : ''}>${roleLabel(k)}</option>`).join('')}
+                                ${['customer', 'worker', ...('staff_role' in p ? ['brigadier', 'foreman'] : []), 'lead', 'accountant', 'pto', 'manager'].map(k => `<option value="${k}" ${profileRoleKey(p) === k ? 'selected' : ''}>${roleLabel(k)}</option>`).join('')}
                             </select>
                         </div>
-                        ${['worker', 'lead'].includes(p.role) ? `<div class="mt-2 flex items-center gap-2 text-xs text-slate-500 flex-wrap">
+                        ${['worker', 'lead'].includes(p.role) && 'worker_id' in p ? `<div class="mt-2 flex items-center gap-2 text-xs text-slate-500 flex-wrap">
                             <span>Он в списке сотрудников (работы на него из вашего списка видны ему как задания)${p._auto?.includes('worker_id') ? ' <b class="text-emerald-700">подобрано по имени</b>' : ''}:</span>
                             <select data-user-worker="${p.id}" onchange="updateUserWorker('${p.id}', this.value)" class="text-xs border border-slate-300 rounded-lg px-2 py-1 max-w-full focus:outline-none focus:ring-2 focus:ring-brand-500">
                                 <option value="">— не связан —</option>
                                 ${appData.workers.slice().sort((a, b) => a.name.localeCompare(b.name, 'ru')).map(w => `<option value="${escapeHtml(w.id)}" ${p.worker_id === w.id ? 'selected' : ''}>${escapeHtml(w.name)}${w.groupName ? ' · ' + escapeHtml(w.groupName) : ''}</option>`).join('')}
                             </select>
                         </div>` : ''}
-                        ${p.role === 'worker' ? `<div class="mt-2 flex items-center gap-2 text-xs text-slate-500">
+                        ${p.role === 'worker' && 'brigade' in p ? `<div class="mt-2 flex items-center gap-2 text-xs text-slate-500">
                             <span>Бригада в табеле (отмечает только её)${p._auto?.includes('brigade') ? ' <b class="text-emerald-700">подобрано по имени</b>' : ''}:</span>
                             <select data-user-brigade="${p.id}" onchange="updateUserBrigade('${p.id}', this.value)" class="text-xs border border-slate-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-500">
                                 <option value="">— не выбрана —</option>

@@ -1103,6 +1103,21 @@ test('Пользователи и роли: бригада и связь с со
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
+test('Без обновления базы «Пользователи и роли» как раньше: без бригад и должностей', async () => {
+    const page = await openApp();
+    await page.evaluate(async () => {
+        __db.profiles = [{ id: 'u5', full_name: 'Данияр', email: 'd@x.ru', role: 'worker' }];
+        __db.project_members = [];
+        appData.workers = [{ id: 'w1', name: 'Данияр Б.', groupName: 'Данияр' }];
+        await openUsersModal();
+    });
+    const roles = await page.$$eval('[data-user-role="u5"] option', o => o.map(x => x.textContent.trim()));
+    expect(!roles.includes('Бригадир') && !roles.includes('Прораб') && roles.includes('Сотрудник'), 'должности видны без обновления базы: ' + JSON.stringify(roles));
+    expect(!(await page.$('[data-user-brigade="u5"]')) && !(await page.$('[data-user-worker="u5"]')), 'настройки бригады видны без обновления базы');
+    expect(await page.evaluate(() => JSON.stringify(__db.profiles[0])) === JSON.stringify({ id: 'u5', full_name: 'Данияр', email: 'd@x.ru', role: 'worker' }), 'профиль изменился');
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
 test('Бригада подбирается сама при входе руководителя, без «Пользователи и роли»', async () => {
     const page = await openApp();
     const p = await page.evaluate(async () => {
@@ -1119,7 +1134,7 @@ test('Бригада подбирается сама при входе руко�
 test('Пользователи и роли: Бригадир и Прораб, бригада для табеля', async () => {
     const page = await openApp();
     await page.evaluate(async () => {
-        __db.profiles = [{ id: 'u5', full_name: 'Данияр', email: 'd@x.ru', role: 'worker' }, { id: 'u8', full_name: 'Руслан', email: 'r@x.ru', role: 'worker' }];
+        __db.profiles = [{ id: 'u5', full_name: 'Данияр', email: 'd@x.ru', role: 'worker', staff_role: null, brigade: null }, { id: 'u8', full_name: 'Руслан', email: 'r@x.ru', role: 'worker', staff_role: null, brigade: null }];
         __db.project_members = [];
         appData.workers = [{ id: 'w1', name: 'Иванов', groupName: 'Данияр' }, { id: 'w2', name: 'Петров', groupName: 'Руслан' }];
         await openUsersModal();
@@ -1133,7 +1148,7 @@ test('Пользователи и роли: Бригадир и Прораб, б
     await page.selectOption('[data-user-role="u8"]', 'foreman');
     await page.waitForFunction(() => __db.profiles[1].staff_role === 'foreman');
     const p = await page.evaluate(() => __db.profiles.map(x => [x.role, x.staff_role, x.brigade || null]));
-    expect(JSON.stringify(p) === JSON.stringify([['worker', 'brigadier', 'Данияр'], ['lead', 'foreman', null]]), 'в базе: ' + JSON.stringify(p));
+    expect(JSON.stringify(p) === JSON.stringify([['worker', 'brigadier', 'Данияр'], ['lead', 'foreman', 'Руслан']]), 'в базе: ' + JSON.stringify(p));
     expect(!(await page.$('[data-user-brigade="u8"]')), 'у прораба выбор бригады (он отмечает все)');
     // Обратно в «Сотрудник» — должность снимается.
     await page.selectOption('[data-user-role="u5"]', 'worker');
