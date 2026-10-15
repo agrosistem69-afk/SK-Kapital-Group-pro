@@ -1078,6 +1078,31 @@ test('Задания бригадиру: видны у него, сроки и �
     expect(!dan.errors.length && !greg.errors.length, 'ошибки на странице: ' + dan.errors.concat(greg.errors).join('; '));
 });
 
+test('Пользователи и роли: бригада и связь с сотрудником подбираются по имени', async () => {
+    const page = await openApp();
+    const p = await page.evaluate(async () => {
+        __db.profiles = [
+            { id: 'u5', full_name: 'Данияр', email: 'd@x.ru', role: 'worker', staff_role: 'brigadier', brigade: null, worker_id: null },
+            { id: 'u6', full_name: 'Руслан Петров', email: 'r@x.ru', role: 'worker', staff_role: null, brigade: null, worker_id: null },
+            { id: 'u7', full_name: 'Алексей', email: 'a@x.ru', role: 'worker', staff_role: null, brigade: null, worker_id: null },
+            { id: 'u8', full_name: 'Иван Сидоров', email: 'i@x.ru', role: 'lead', staff_role: 'foreman', brigade: null, worker_id: null }];
+        __db.project_members = [];
+        appData.workers = [{ id: 'w1', name: 'Данияр Б.', groupName: 'Бригадиры' }, { id: 'w2', name: 'Иванов Иван', groupName: 'Данияр' },
+            { id: 'w3', name: 'Петров Руслан', groupName: 'Руслан' }, { id: 'w4', name: 'Алексей К.', groupName: 'Данияр' }, { id: 'w5', name: 'Алексей М.', groupName: 'Руслан' },
+            { id: 'w6', name: 'Сидоров Иван', groupName: 'ИТР' }];
+        await openUsersModal();
+        return __db.profiles.map(x => [x.id, x.worker_id, x.brigade]);
+    });
+    expect(JSON.stringify(p) === JSON.stringify([['u5', 'w1', 'Данияр'], ['u6', 'w3', 'Руслан'], ['u7', null, null], ['u8', 'w6', null]]),
+        'подобрано неверно (два Алексея — не угадываем, прорабу бригада не нужна): ' + JSON.stringify(p));
+    expect(/подобрано по имени/.test(await page.$eval('#usersListContainer', e => e.innerText)), 'не видно, что подобрано автоматически');
+    // Выбрал связь вручную — бригада подставилась по имени, если её не было.
+    await page.selectOption('[data-user-worker="u7"]', 'w5');
+    await page.waitForFunction(() => __db.profiles[2].worker_id === 'w5');
+    expect(await page.evaluate(() => __db.profiles[2].brigade) === 'Руслан', 'бригада не подставилась по выбранному сотруднику');
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
 test('Пользователи и роли: Бригадир и Прораб, бригада для табеля', async () => {
     const page = await openApp();
     await page.evaluate(async () => {

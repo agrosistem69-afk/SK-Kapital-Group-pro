@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '36';
+        window.APP_VERSION = '37';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=36">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=36">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=36">
+    <link rel="stylesheet" href="vendor/app.css?v=37">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=37">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=37">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=36" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=36" defer></script>
-    <script src="vendor/jszip.min.js?v=36" defer></script>
+    <script src="vendor/html2canvas.min.js?v=37" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=37" defer></script>
+    <script src="vendor/jszip.min.js?v=37" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=36"></script>
+    <script src="vendor/supabase.js?v=37"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -10217,6 +10217,7 @@
         async function renderUsersList() {
             const { data: profiles } = await sb.from('profiles').select('*').order('created_at');
             usersListProfiles = profiles || [];
+            await autoLinkProfiles(usersListProfiles);
             const { data: members } = await sb.from('project_members').select('*');
             const container = document.getElementById('usersListContainer');
 
@@ -10243,14 +10244,14 @@
                             </select>
                         </div>
                         ${['worker', 'lead'].includes(p.role) ? `<div class="mt-2 flex items-center gap-2 text-xs text-slate-500 flex-wrap">
-                            <span>Он в списке сотрудников (работы на него из вашего списка видны ему как задания):</span>
+                            <span>Он в списке сотрудников (работы на него из вашего списка видны ему как задания)${p._auto?.includes('worker_id') ? ' <b class="text-emerald-700">подобрано по имени</b>' : ''}:</span>
                             <select data-user-worker="${p.id}" onchange="updateUserWorker('${p.id}', this.value)" class="text-xs border border-slate-300 rounded-lg px-2 py-1 max-w-full focus:outline-none focus:ring-2 focus:ring-brand-500">
                                 <option value="">— не связан —</option>
                                 ${appData.workers.slice().sort((a, b) => a.name.localeCompare(b.name, 'ru')).map(w => `<option value="${escapeHtml(w.id)}" ${p.worker_id === w.id ? 'selected' : ''}>${escapeHtml(w.name)}${w.groupName ? ' · ' + escapeHtml(w.groupName) : ''}</option>`).join('')}
                             </select>
                         </div>` : ''}
                         ${p.role === 'worker' ? `<div class="mt-2 flex items-center gap-2 text-xs text-slate-500">
-                            <span>Бригада в табеле (отмечает только её):</span>
+                            <span>Бригада в табеле (отмечает только её)${p._auto?.includes('brigade') ? ' <b class="text-emerald-700">подобрано по имени</b>' : ''}:</span>
                             <select data-user-brigade="${p.id}" onchange="updateUserBrigade('${p.id}', this.value)" class="text-xs border border-slate-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-500">
                                 <option value="">— не выбрана —</option>
                                 ${allBrigadeNames(p.brigade).map(b => `<option value="${escapeHtml(b)}" ${p.brigade === b ? 'selected' : ''}>${escapeHtml(b)}</option>`).join('')}
@@ -10271,8 +10272,52 @@
             if (error) { alert('Ошибка: ' + error.message + (/staff_role/.test(error.message) ? '\n\nВ базе ещё нет полей для должностей — выполните supabase/staff_roles.sql.' : '')); return; }
             await renderUsersList();
         }
+        // Подбор по имени, чтобы руководителю не настраивать вручную: «Данияр» ↔ сотрудник «Данияр Б.».
+        // Слова короче двух букв (инициалы) не считаются; подходит, только если найден ровно один вариант.
+        const nameWords = n => (n || '').toLowerCase().replace(/ё/g, 'е').split(/[^a-zа-я]+/).filter(w => w.length >= 2);
+        function namesMatch(a, b) {
+            const x = nameWords(a), y = nameWords(b);
+            if (!x.length || !y.length) return false;
+            const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+            return short.every(w => long.includes(w));
+        }
+        function guessWorker(p, taken) {
+            const found = appData.workers.filter(w => !taken.has(w.id) && namesMatch(p.full_name, w.name));
+            return found.length === 1 ? found[0] : null;
+        }
+        // Бригада: группа в табеле, названная его именем (бригада Данияра — «Данияр»), иначе группа его записи в «Сотрудниках».
+        function guessBrigade(p, worker) {
+            const groups = allBrigadeNames().filter(g => namesMatch(p.full_name, g));
+            if (groups.length === 1) return groups[0];
+            return worker?.groupName || '';
+        }
+        async function autoLinkProfiles(profiles) {
+            const taken = new Set(profiles.map(p => p.worker_id).filter(Boolean));
+            for (const p of profiles) {
+                if (!['worker', 'lead'].includes(p.role)) continue;
+                const patch = {};
+                if ('worker_id' in p && !p.worker_id) {
+                    const w = guessWorker(p, taken);
+                    if (w) { patch.worker_id = w.id; taken.add(w.id); }
+                }
+                if (p.role === 'worker' && 'brigade' in p && !p.brigade) {
+                    const b = guessBrigade(p, appData.workers.find(w => w.id === (patch.worker_id || p.worker_id)));
+                    if (b) patch.brigade = b;
+                }
+                if (!Object.keys(patch).length) continue;
+                const { error } = await sb.from('profiles').update(patch).eq('id', p.id);
+                if (!error) { Object.assign(p, patch); p._auto = Object.keys(patch); }
+            }
+        }
+
         async function updateUserWorker(userId, workerId) {
-            const { error } = await sb.from('profiles').update({ worker_id: workerId || null }).eq('id', userId);
+            const prof = usersListProfiles.find(p => p.id === userId);
+            const patch = { worker_id: workerId || null };
+            if (workerId && prof?.role === 'worker' && 'brigade' in prof && !prof.brigade) {
+                const b = guessBrigade(prof, appData.workers.find(w => w.id === workerId));
+                if (b) patch.brigade = b;
+            }
+            const { error } = await sb.from('profiles').update(patch).eq('id', userId);
             if (error) { alert('Ошибка: ' + error.message + (/worker_id/.test(error.message) ? '\n\nВ базе ещё нет этого поля — выполните supabase/assignments.sql.' : '')); return; }
             await renderUsersList();
         }
