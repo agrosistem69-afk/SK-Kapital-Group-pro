@@ -929,6 +929,39 @@ test('Табель: сотрудник без бригады только смо
     expect(!worker.errors.length, 'ошибки на странице: ' + worker.errors.join('; '));
 });
 
+test('Работа в списке: процент сверху, «⋯» с меню «Удалить», синяя галочка справа', async () => {
+    const page = await openApp();
+    await page.evaluate(async () => {
+        __db.tasks = [{ id: 't1', project_id: 'p1', title: 'Укладка плитки', category: 'Участок 1', status: 'in_progress', progress: 40 }];
+        appData.currentProjectId = 'p1';
+        await refreshAllData();
+        await openProject('p1');
+    });
+    const geo = await page.evaluate(() => {
+        const row = document.querySelector('#tasksContainer .task-row'), b = el => el.getBoundingClientRect();
+        const title = [...row.querySelectorAll('div')].find(d => d.textContent.trim() === 'Укладка плитки');
+        const check = row.querySelector('button[title="Отметить работу как выполненную"]');
+        return { pct: b(row.querySelector('.task-pct')).bottom, pctText: row.querySelector('.task-pct').textContent, title: b(title).top, titleRight: b(title).right, check: b(check).left };
+    });
+    expect(geo.pct <= geo.title && geo.pctText === '40%', 'процент не над работой: ' + JSON.stringify(geo));
+    expect(geo.check > geo.titleRight, 'галочка не справа: ' + JSON.stringify(geo));
+    expect(!(await visible(page, '#taskMenu')), 'меню открыто без нажатия');
+    await page.hover('#tasksContainer .task-row');
+    await page.click('#tasksContainer .task-more');
+    expect(await visible(page, '#taskMenu') && /Удалить/.test(await page.$eval('#taskMenu', e => e.innerText)), 'по «⋯» нет меню с «Удалить»');
+    expect(!(await visible(page, '#taskModal')), 'нажатие на «⋯» открыло редактирование');
+    page.once('dialog', d => d.accept());
+    await page.click('#taskMenu >> text=Удалить');
+    await page.waitForFunction(() => __db.tasks.length === 0);
+    // Галочка синяя.
+    await page.evaluate(async () => { __db.tasks = [{ id: 't2', project_id: 'p1', title: 'Газон', category: 'Участок 1', status: 'new', progress: 0 }]; await refreshAllData(); renderTasksList(); });
+    await page.click('#tasksContainer button[title="Отметить работу как выполненную"]');
+    await page.waitForFunction(() => __db.tasks[0].struck === true);
+    const bg = await page.$eval('#tasksContainer button[title="Отметить работу как выполненную"]', el => getComputedStyle(el).backgroundColor);
+    expect(bg === 'rgb(37, 99, 235)', 'отмеченная галочка не синяя: ' + bg);
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
 test('Свои списки работ: у сотрудника свой, руководитель открывает список любого', async () => {
     const tasks = [
         { id: 'g1', project_id: 'p1', title: 'Работа Грега', category: 'Участок 1', status: 'new', progress: 0, owner_id: null },

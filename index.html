@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '35';
+        window.APP_VERSION = '36';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=35">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=35">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=35">
+    <link rel="stylesheet" href="vendor/app.css?v=36">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=36">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=36">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=35" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=35" defer></script>
-    <script src="vendor/jszip.min.js?v=35" defer></script>
+    <script src="vendor/html2canvas.min.js?v=36" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=36" defer></script>
+    <script src="vendor/jszip.min.js?v=36" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=35"></script>
+    <script src="vendor/supabase.js?v=36"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -97,6 +97,8 @@
         .task-drop-row.drop-target { background-color: #e0f2fe !important; }
         .task-drop-end-zone { transition: height 0.12s ease; }
         .task-drop-end-zone.drop-target { height: 10px !important; background-color: #0284c7; }
+        /* «⋯» у работы: на компьютере появляется при наведении, на телефоне видно всегда */
+        @media (hover: hover) { .task-row .task-more { opacity: 0; } .task-row:hover .task-more, .task-row .task-more:focus { opacity: 1; } }
     </style>
 </head>
 <body class="bg-slate-100 text-slate-800 font-sans antialiased min-h-screen flex flex-col">
@@ -904,6 +906,7 @@
     </div>
 
     <!-- MODAL: ADD / EDIT TASK -->
+    <div id="taskMenu" class="hidden fixed z-[60] w-60 bg-white rounded-xl shadow-xl border border-slate-200 overflow-hidden"></div>
     <div id="taskModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
         <div class="bg-white rounded-xl shadow-xl max-w-lg w-full overflow-hidden">
             <div class="bg-slate-900 px-6 py-4 text-white flex justify-between items-center">
@@ -3020,46 +3023,71 @@
                 ? `<span class="inline-flex items-center gap-1 bg-slate-100 text-slate-600 text-[11px] font-medium px-2 py-0.5 rounded"><i class="fa-regular fa-user text-slate-400"></i>${escapeHtml(workerName)}</span>`
                 : `<span class="inline-flex items-center gap-1 bg-slate-100 text-slate-600 text-[11px] font-medium px-2 py-0.5 rounded"><i class="fa-solid fa-layer-group text-slate-400"></i>${escapeHtml(task.category || 'Без участка')}</span>`;
 
-            const actionButtons = canEditTasks ? `
-                <div class="flex items-center gap-0.5 flex-shrink-0">
-                    <button onclick="event.stopPropagation(); editTask('${task.id}')" class="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-slate-100 rounded-lg transition-colors" title="Редактировать"><i class="fa-solid fa-pen text-xs"></i></button>
-                    ${['manager','lead'].includes(currentUserRole) && !assignment ? `<button onclick="event.stopPropagation(); deleteTask('${task.id}')" class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded-lg transition-colors" title="Удалить"><i class="fa-solid fa-trash-can text-xs"></i></button>` : ''}
-                </div>
-            ` : '';
+            const actionButtons = canEditTasks
+                ? `<button onclick="event.stopPropagation(); openTaskMenu('${task.id}', this)" class="task-more flex-shrink-0 w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition-opacity" title="Действия"><i class="fa-solid fa-ellipsis text-xs"></i></button>`
+                : '';
 
             const checkboxRight = canEditTasks && !assignment
-                ? `<button onclick="event.stopPropagation(); toggleTaskStruck('${task.id}')" class="flex-shrink-0 mt-0.5 w-6 h-6 rounded-md border-2 flex items-center justify-center transition-colors ${task.struck ? 'bg-[#7cb342] border-[#7cb342]' : 'bg-white border-slate-300 hover:border-[#7cb342]'}" title="Отметить работу как выполненную">${task.struck ? '<i class="fa-solid fa-check text-white text-[11px]"></i>' : ''}</button>`
+                ? `<button onclick="event.stopPropagation(); toggleTaskStruck('${task.id}')" class="flex-shrink-0 w-6 h-6 rounded-md border-2 flex items-center justify-center transition-colors ${task.struck ? 'bg-blue-600 border-blue-600' : 'bg-white border-slate-300 hover:border-blue-500'}" title="Отметить работу как выполненную">${task.struck ? '<i class="fa-solid fa-check text-white text-[11px]"></i>' : ''}</button>`
                 : (task.struck
-                    ? `<span class="flex-shrink-0 mt-0.5 w-6 h-6 rounded-md bg-[#7cb342] flex items-center justify-center"><i class="fa-solid fa-check text-white text-[11px]"></i></span>`
-                    : `<span class="flex-shrink-0 mt-0.5 w-6 h-6 rounded-md border-2 border-slate-200" ${assignment ? 'title="Закрывает автор задания после проверки"' : ''}></span>`);
+                    ? `<span class="flex-shrink-0 w-6 h-6 rounded-md bg-blue-600 flex items-center justify-center"><i class="fa-solid fa-check text-white text-[11px]"></i></span>`
+                    : `<span class="flex-shrink-0 w-6 h-6 rounded-md border-2 border-slate-200" ${assignment ? 'title="Закрывает автор задания после проверки"' : ''}></span>`);
             const assignmentChip = assignment
                 ? `<span data-assignment class="inline-flex items-center gap-1 bg-amber-50 text-amber-800 border border-amber-200 text-[11px] font-medium px-2 py-0.5 rounded"><i class="fa-solid fa-user-tie"></i>Задание от ${escapeHtml(taskOwnerLabel(task))}</span>`
                 : '';
 
+            // Сверху — процент выполнения, ниже — работа; справа — «⋯» (меню действий) и квадратик-галочка.
             return `
-                <div class="hover:bg-slate-50/80 transition-colors task-row px-4 py-3 flex items-start gap-2.5 ${task.struck ? 'bg-slate-50/60' : ''} ${canEditTasks ? 'cursor-pointer' : ''}" ${canEditTasks ? `onclick="editTask('${task.id}')"` : ''} ${dragAttrs}>
-                    ${canEditTasks && !assignment ? `<div class="pt-1 flex-shrink-0 text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing" title="Перетащите, чтобы изменить порядок или группу"><i class="fa-solid fa-grip-vertical text-xs"></i></div>` : ''}
-                    <div class="flex-grow min-w-0">
-                        <div class="flex items-start justify-between gap-2">
-                            <div class="font-semibold text-slate-800 text-sm break-words ${task.struck ? 'line-through decoration-2 text-slate-400' : ''}">${escapeHtml(task.title)}</div>
+                <div class="hover:bg-slate-50/80 transition-colors task-row px-4 py-3 ${task.struck ? 'bg-slate-50/60' : ''} ${canEditTasks ? 'cursor-pointer' : ''}" ${canEditTasks ? `onclick="editTask('${task.id}')"` : ''} ${dragAttrs}>
+                    <div class="flex items-center gap-2 mb-1.5 ${canEditTasks && !assignment ? 'pl-5' : ''}">
+                        <span class="task-pct text-[10px] font-bold text-slate-500 w-8 flex-shrink-0">${taskProgress(task)}%</span>
+                        <div class="flex-grow bg-slate-200 rounded-full h-1.5 overflow-hidden"><div class="${task.struck ? 'bg-blue-600' : 'bg-brand-600'} h-1.5 rounded-full transition-all" style="width: ${taskProgress(task)}%"></div></div>
+                    </div>
+                    <div class="flex items-start gap-2.5">
+                        ${canEditTasks && !assignment ? `<div class="pt-1 flex-shrink-0 text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing" title="Перетащите, чтобы изменить порядок или группу"><i class="fa-solid fa-grip-vertical text-xs"></i></div>` : ''}
+                        <div class="flex-grow min-w-0">
+                            <div class="font-semibold text-sm break-words ${task.struck ? 'line-through decoration-2 text-slate-400' : 'text-slate-800'}">${escapeHtml(task.title)}</div>
+                            ${task.notes ? `<div class="text-xs text-slate-400 mt-0.5 break-words ${task.struck ? 'line-through' : ''}"><i class="fa-regular fa-note-sticky mr-1"></i>${escapeHtml(task.notes)}</div>` : ''}
+                            <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
+                                ${assignmentChip}${assigneeChip}
+                                <span class="inline-flex items-center gap-1 text-[11px] text-slate-500"><i class="fa-regular fa-calendar text-slate-400"></i>${formatDateDisplay(task.startDate)} &rarr; ${formatDateDisplay(task.dueDate)}</span>
+                                ${deadlineBadge}
+                                ${canEditTasks ? `<button onclick="event.stopPropagation(); cycleTaskStatus('${task.id}')">${statusBadge}</button>` : statusBadge}
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-1.5 flex-shrink-0">
                             ${actionButtons}
-                        </div>
-                        ${task.notes ? `<div class="text-xs text-slate-400 mt-0.5 break-words ${task.struck ? 'line-through' : ''}"><i class="fa-regular fa-note-sticky mr-1"></i>${escapeHtml(task.notes)}</div>` : ''}
-                        <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
-                            ${assignmentChip}${assigneeChip}
-                            <span class="inline-flex items-center gap-1 text-[11px] text-slate-500"><i class="fa-regular fa-calendar text-slate-400"></i>${formatDateDisplay(task.startDate)} &rarr; ${formatDateDisplay(task.dueDate)}</span>
-                            ${deadlineBadge}
-                            ${canEditTasks ? `<button onclick="event.stopPropagation(); cycleTaskStatus('${task.id}')">${statusBadge}</button>` : statusBadge}
-                        </div>
-                        <div class="flex items-center gap-2 mt-2">
-                            <div class="flex-grow bg-slate-200 rounded-full h-1.5 overflow-hidden"><div class="bg-brand-600 h-1.5 rounded-full transition-all" style="width: ${taskProgress(task)}%"></div></div>
-                            <span class="text-[10px] font-bold text-slate-500 w-8 text-right flex-shrink-0">${taskProgress(task)}%</span>
+                            ${checkboxRight}
                         </div>
                     </div>
-                    ${checkboxRight}
                 </div>
             `;
         }
+
+        // Меню «⋯» у работы: «Редактировать» и «Удалить» (удалить — руководитель и руководство, не в чужом задании).
+        function openTaskMenu(taskId, btn) {
+            const task = appData.tasks.find(t => t.id === taskId);
+            if (!task) return;
+            const menu = document.getElementById('taskMenu');
+            const canDelete = ['manager', 'lead'].includes(currentUserRole) && !taskIsAssignment(task);
+            menu.innerHTML = `
+                <div class="flex items-center justify-between px-4 pt-3 pb-2">
+                    <span class="flex-1 text-center text-sm font-semibold text-slate-700">Действия</span>
+                    <button onclick="closeTaskMenu()" class="w-7 h-7 rounded-lg text-slate-500 hover:bg-slate-100" title="Закрыть"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <button onclick="closeTaskMenu(); editTask('${task.id}')" class="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-100">Редактировать</button>
+                ${canDelete ? `<button onclick="closeTaskMenu(); deleteTask('${task.id}')" class="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-100" title="Удалить">Удалить</button>` : ''}
+                <div class="h-2"></div>`;
+            menu.classList.remove('hidden');
+            const r = btn.getBoundingClientRect(), w = menu.offsetWidth, h = menu.offsetHeight;
+            const left = Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w));
+            const top = r.bottom + 6 + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 6) : r.bottom + 6;
+            menu.style.left = left + 'px';
+            menu.style.top = top + 'px';
+        }
+        function closeTaskMenu() { document.getElementById('taskMenu')?.classList.add('hidden'); }
+        document.addEventListener('click', e => { if (!e.target.closest?.('#taskMenu, .task-more')) closeTaskMenu(); });
+        window.addEventListener('scroll', closeTaskMenu, true);
 
         function toggleAccordion(key) {
             appData.accordionState[key] = !appData.accordionState[key];
