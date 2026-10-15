@@ -24,7 +24,7 @@ drop trigger if exists profiles_guard_staff on public.profiles;
 create trigger profiles_guard_staff before update on public.profiles
     for each row execute function public.profiles_guard_staff();
 
--- 2. Табель: сотрудник и бригадир отмечают только свою бригаду; руководитель, руководство и прораб — любую.
+-- 2. Табель: сотрудник и бригадир отмечают только свою бригаду (если она определена); руководитель, руководство и прораб — любую.
 create or replace function public.timesheet_guard_brigade() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare
@@ -36,8 +36,9 @@ begin
     if my_role in ('manager', 'lead') then return coalesce(new, old); end if;
     wid := case when tg_op = 'DELETE' then old.worker_id else new.worker_id end;
     select group_name into worker_group from public.workers where id = wid;
-    if my_role = 'worker' and coalesce(trim(my_brigade), '') <> ''
-       and lower(trim(coalesce(worker_group, ''))) = lower(trim(my_brigade)) then
+    -- Бригада не определена — как раньше: сотрудник отмечает всех.
+    if my_role = 'worker' and coalesce(trim(my_brigade), '') = '' then return coalesce(new, old); end if;
+    if my_role = 'worker' and lower(trim(coalesce(worker_group, ''))) = lower(trim(my_brigade)) then
         return coalesce(new, old);
     end if;
     raise exception 'В табеле можно отмечать только свою бригаду';

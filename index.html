@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '37';
+        window.APP_VERSION = '38';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=37">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=37">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=37">
+    <link rel="stylesheet" href="vendor/app.css?v=38">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=38">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=38">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=37" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=37" defer></script>
-    <script src="vendor/jszip.min.js?v=37" defer></script>
+    <script src="vendor/html2canvas.min.js?v=38" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=38" defer></script>
+    <script src="vendor/jszip.min.js?v=38" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=37"></script>
+    <script src="vendor/supabase.js?v=38"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -2345,6 +2345,8 @@
             if (currentUserRole === 'manager') {
                 const { data: people } = await sb.from('profiles').select('*').order('full_name');
                 appData.people = people || [];
+                // Бригаду и связь с «Сотрудниками» подбираем по имени сами — руководителю настраивать ничего не нужно.
+                await autoLinkProfiles(appData.people);
             }
             applyTaskDesk();
             appData.recipients = (recipientsRes.data || []).map(r => ({ id: r.id, name: r.name, channel: r.channel, value: r.value }));
@@ -4313,15 +4315,14 @@
             const available = appData.workers.filter(w => !rosterWorkerIds.has(w.id) && (!brigade || sameBrigade(w.groupName, brigade)));
             // Сотрудник/бригадир добавляет людей только в свою бригаду; без бригады — не добавляет вовсе.
             const tools = document.getElementById('timesheetEditTools');
-            const canAdd = ['manager', 'lead'].includes(currentUserRole) || !!brigade;
+            const canAdd = ['manager', 'lead', 'worker'].includes(currentUserRole);
             if (['manager', 'lead', 'worker'].includes(currentUserRole)) tools.classList.toggle('hidden', !canAdd);
             const groupInput = document.getElementById('timesheetNewWorkerGroup');
             groupInput.readOnly = !!brigade;
             if (brigade) groupInput.value = brigade;
             const note = document.getElementById('timesheetBrigadeNote');
-            note.textContent = currentUserRole === 'worker'
-                ? (brigade ? `Вы отмечаете только свою бригаду «${brigade}». Остальные бригады видны для просмотра.` : 'Отмечать в табеле можно будет, когда руководитель назначит вам бригаду.')
-                : '';
+            note.textContent = currentUserRole === 'worker' && brigade
+                ? `Вы отмечаете только свою бригаду «${brigade}». Остальные бригады видны для просмотра.` : '';
             note.classList.toggle('hidden', !note.textContent);
             addSelect.innerHTML = '<option value="">Добавить существующего сотрудника...</option>' +
                 available.map(w => `<option value="${w.id}">${escapeHtml(w.name)}</option>`).join('');
@@ -4412,13 +4413,14 @@
 
         // Кто какую бригаду отмечает в табеле. Видят табель все, а отмечать:
         // руководитель, руководство и прораб — любую бригаду; сотрудник и бригадир — только свою
-        // (её назначают в «Пользователи и роли»); остальные — ничего.
+        // (подбирается по имени: бригада «Данияр» — у Данияра). Если своя бригада не нашлась — как раньше, любую.
         const sameBrigade = (a, b) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
         const myBrigade = () => (currentUserRole === 'worker' ? (currentUserProfile?.brigade || '').trim() : '');
         function timesheetCanEditGroup(groupKey) {
             if (['manager', 'lead'].includes(currentUserRole)) return true;
             if (currentUserRole !== 'worker') return false;
-            return !!myBrigade() && groupKey !== '__none__' && sameBrigade(groupKey, myBrigade());
+            if (!myBrigade()) return true;
+            return groupKey !== '__none__' && sameBrigade(groupKey, myBrigade());
         }
         const timesheetCanEditWorker = workerId => {
             const w = appData.workers.find(x => x.id === workerId);

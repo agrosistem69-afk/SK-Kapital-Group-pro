@@ -913,12 +913,12 @@ test('Табель: бригадир видит все бригады, а отм
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
-test('Табель: сотрудник без бригады только смотрит, руководитель и прораб отмечают всех', async () => {
+test('Табель: сотрудник без своей бригады отмечает всех, как раньше; руководитель и прораб — всех', async () => {
     const worker = await openApp({ role: 'worker' });
     await openTimesheet(worker, { id: 'u6', full_name: 'Новичок', role: 'worker', brigade: null });
-    expect(!(await tsCell(worker, 'w1', 3)).clickable && !(await tsCell(worker, 'w2', 3)).clickable, 'без бригады можно отмечать');
-    expect(!(await visible(worker, '#timesheetEditTools')), 'без бригады видно «Новый сотрудник»');
-    expect(/назначит вам бригаду/.test(await worker.$eval('#timesheetBrigadeNote', e => e.innerText)), 'нет объяснения, почему нельзя отмечать');
+    expect((await tsCell(worker, 'w1', 3)).clickable && (await tsCell(worker, 'w2', 3)).clickable, 'без бригады нельзя отмечать');
+    expect(await visible(worker, '#timesheetEditTools'), 'без бригады не видно «Новый сотрудник»');
+    expect(!(await visible(worker, '#timesheetBrigadeNote')), 'лишняя подсказка про бригаду');
     for (const [role, profile] of [['manager', { id: 'u1', full_name: 'Грег', role: 'manager' }], ['lead', { id: 'u7', full_name: 'Прораб', role: 'lead', staff_role: 'foreman' }]]) {
         const page = await openApp({ role });
         await openTimesheet(page, profile);
@@ -1100,6 +1100,19 @@ test('Пользователи и роли: бригада и связь с со
     await page.selectOption('[data-user-worker="u7"]', 'w5');
     await page.waitForFunction(() => __db.profiles[2].worker_id === 'w5');
     expect(await page.evaluate(() => __db.profiles[2].brigade) === 'Руслан', 'бригада не подставилась по выбранному сотруднику');
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
+test('Бригада подбирается сама при входе руководителя, без «Пользователи и роли»', async () => {
+    const page = await openApp();
+    const p = await page.evaluate(async () => {
+        currentUserProfile = { id: 'u1', full_name: 'Грег', role: 'manager' };
+        __db.profiles = [currentUserProfile, { id: 'u5', full_name: 'Данияр', role: 'worker', staff_role: null, brigade: null, worker_id: null }];
+        __db.workers = [{ id: 'w1', name: 'Данияр Б.', group_name: 'Бригадиры' }, { id: 'w2', name: 'Иванов Иван', group_name: 'Данияр' }];
+        await refreshAllData();
+        return __db.profiles[1];
+    });
+    expect(p.worker_id === 'w1' && p.brigade === 'Данияр', 'не подобралось при входе: ' + JSON.stringify(p));
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
