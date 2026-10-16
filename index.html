@@ -18,9 +18,9 @@
 
     <!-- PWA -->
     <link rel="manifest" href="manifest.json">
-    <link rel="icon" type="image/png" href="favicon.png">
-    <meta name="theme-color" content="#0f172a">
-    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="icon" type="image/png" href="favicon.png?v=49">
+    <meta name="theme-color" content="#0b1730">
+    <link rel="apple-touch-icon" href="icons/icon-192.png?v=49">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="SKKG Pro">
@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '48';
+        window.APP_VERSION = '49';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=48">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=48">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=48">
+    <link rel="stylesheet" href="vendor/app.css?v=49">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=49">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=49">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=48" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=48" defer></script>
-    <script src="vendor/jszip.min.js?v=48" defer></script>
+    <script src="vendor/html2canvas.min.js?v=49" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=49" defer></script>
+    <script src="vendor/jszip.min.js?v=49" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=48"></script>
+    <script src="vendor/supabase.js?v=49"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -102,11 +102,11 @@
         /* Заставка при запуске и экран отпечатка (в духе тёмной заставки с подсвеченными буквами) */
         #splash { position: fixed; inset: 0; z-index: 2147482000; pointer-events: none; display: flex; flex-direction: column; align-items: center; justify-content: center;
                   background: radial-gradient(120% 80% at 50% 40%, #12305a 0%, #0b1730 55%, #050b18 100%); color: #e6f1ff;
-                  animation: splashOut .6s ease 2.1s forwards; }
+                  animation: splashOut .9s ease 3.9s forwards; }
         #splash .sp-word { display: flex; gap: .55em; font-size: 34px; font-weight: 300; letter-spacing: .02em; }
-        #splash .sp-word span { opacity: 0; filter: blur(8px); transform: translateY(6px); animation: splashLetter .7s cubic-bezier(.2,.7,.2,1) forwards; text-shadow: 0 0 18px rgba(125,211,252,.55); }
-        #splash .sp-line { width: 0; height: 1px; margin: 16px 0 12px; background: linear-gradient(90deg, transparent, #7dd3fc, transparent); box-shadow: 0 0 10px #38bdf8; animation: splashLine .9s ease .75s forwards; }
-        #splash .sp-sub { font-size: 11px; letter-spacing: .5em; text-transform: uppercase; color: #93c5fd; opacity: 0; animation: splashFade .7s ease 1.05s forwards; padding-left: .5em; }
+        #splash .sp-word span { opacity: 0; filter: blur(8px); transform: translateY(6px); animation: splashLetter 1.1s cubic-bezier(.2,.7,.2,1) forwards; text-shadow: 0 0 18px rgba(125,211,252,.55); }
+        #splash .sp-line { width: 0; height: 1px; margin: 16px 0 12px; background: linear-gradient(90deg, transparent, #7dd3fc, transparent); box-shadow: 0 0 10px #38bdf8; animation: splashLine 1.3s ease 1.4s forwards; }
+        #splash .sp-sub { font-size: 11px; letter-spacing: .5em; text-transform: uppercase; color: #93c5fd; opacity: 0; animation: splashFade 1s ease 2s forwards; padding-left: .5em; }
         @keyframes splashLetter { to { opacity: 1; filter: blur(0); transform: none; } }
         @keyframes splashLine { to { width: 180px; } }
         @keyframes splashFade { to { opacity: .85; } }
@@ -149,10 +149,10 @@
 </head>
 <body class="bg-slate-100 text-slate-800 font-sans antialiased min-h-screen flex flex-col">
 
-    <!-- Заставка при запуске: буквы проявляются, под ними загорается линия, через 2 секунды исчезает сама.
+    <!-- Заставка при запуске: буквы проявляются, под ними загорается линия, примерно через 4 секунды исчезает сама.
          Нажатиям не мешает (pointer-events: none), поэтому приложение под ней уже работает. -->
     <div id="splash" aria-hidden="true">
-        <div class="sp-word"><span style="animation-delay:.05s">S</span><span style="animation-delay:.2s">K</span><span style="animation-delay:.35s">K</span><span style="animation-delay:.5s">G</span></div>
+        <div class="sp-word"><span style="animation-delay:.1s">S</span><span style="animation-delay:.4s">K</span><span style="animation-delay:.7s">K</span><span style="animation-delay:1s">G</span></div>
         <div class="sp-line"></div>
         <div class="sp-sub">СК Капитал Групп</div>
     </div>
@@ -2438,7 +2438,7 @@
         }
         if (bioSaved()) { bioShowLock(); bioUnlock(); }
         // Заставка исчезает сама (CSS); после этого убираем её со страницы совсем.
-        setTimeout(() => { const sp = document.getElementById('splash'); if (sp) sp.remove(); }, 3000);
+        setTimeout(() => { const sp = document.getElementById('splash'); if (sp) sp.remove(); }, 5000);
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'hidden') { bioHiddenAt = Date.now(); return; }
             if (bioSaved() && bioHiddenAt && Date.now() - bioHiddenAt > BIO_RELOCK_MS) { bioShowLock(); bioUnlock(); }

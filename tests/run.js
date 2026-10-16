@@ -929,13 +929,14 @@ test('Вход по отпечатку: включается в «Аккаунт
 });
 
 // ---- Заставка при запуске ----
-test('Заставка: буквы SKKG проявляются, нажатиям не мешает, через 3 секунды исчезает; отпечаток дорисовывает кольцо', async () => {
+test('Заставка: буквы SKKG проявляются, нажатиям не мешает, держится около 4 секунд и исчезает; отпечаток дорисовывает кольцо', async () => {
     const page = await openApp({ width: 390, height: 844 });
     expect(await page.$('#splash'), 'заставки нет при запуске');
     expect(await page.$eval('#splash .sp-word', el => el.textContent) === 'SKKG', 'в заставке нет букв SKKG');
     expect(await page.$eval('#splash', el => getComputedStyle(el).pointerEvents) === 'none', 'заставка перехватывает нажатия');
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(2300);
     expect(await page.$eval('#splash .sp-word span:last-child', el => +getComputedStyle(el).opacity) > 0.9, 'буквы не проявились');
+    expect(await page.$eval('#splash', el => +getComputedStyle(el).opacity) === 1, 'заставка пропадает слишком рано — не успеть полюбоваться');
     await page.waitForFunction(() => !document.getElementById('splash'), null, { timeout: 5000 });
     // Успешный отпечаток: вокруг кнопки рисуется кольцо, потом замок гаснет.
     await page.evaluate(() => {
@@ -964,6 +965,9 @@ test('Окно входа в стиле заставки: тёмный фон, �
         expect(box.l >= 0 && box.r <= 390, sel + ' вылезает за край экрана');
     }
     expect(await page.$eval('#newPasswordScreen', el => el.classList.contains('auth-glow')), 'окно нового пароля не в стиле заставки');
+    // Первое окно телефона при запуске (из manifest.json): новое имя и тёмный фон, как у заставки.
+    const man = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, '..', 'manifest.json'), 'utf8'));
+    expect(man.name === 'SKKG Pro' && man.short_name === 'SKKG Pro' && man.background_color === '#0b1730', 'в manifest.json старое имя или фон');
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
