@@ -6,6 +6,9 @@
 // от приложения, как и при прямом подключении.
 // Адрес: sb.php?u=/rest/v1/tasks%3Fselect%3D*  (u — путь и параметры запроса к базе).
 
+// Метка, по которой приложение понимает, что ответил именно этот файл (а не хостинг без PHP).
+header('X-Sb-Proxy: 1');
+
 $upstream = getenv('SB_UPSTREAM') ?: 'https://pgejlzsfofkgdsgwptfa.supabase.co';
 
 $path = isset($_GET['u']) ? (string)$_GET['u'] : '';

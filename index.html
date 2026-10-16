@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '41';
+        window.APP_VERSION = '42';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=41">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=41">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=41">
+    <link rel="stylesheet" href="vendor/app.css?v=42">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=42">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=42">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=41" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=41" defer></script>
-    <script src="vendor/jszip.min.js?v=41" defer></script>
+    <script src="vendor/html2canvas.min.js?v=42" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=42" defer></script>
+    <script src="vendor/jszip.min.js?v=42" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=41"></script>
+    <script src="vendor/supabase.js?v=42"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -2002,7 +2002,13 @@
         async function sbFetch(input, init) {
             const url = typeof input === 'string' ? input : (input && input.url) || String(input);
             if (!url.startsWith(SUPABASE_URL + '/')) return fetch(input, init);
-            const viaProxy = () => fetch(sbProxied(url), sbProxyInit(init));
+            // Ответ считается рабочим, только если его дал sb.php (метка X-Sb-Proxy) и он достучался до базы.
+            // Хостинг без PHP отдаёт сам файл или свою страницу ошибки — это то же, что «нет связи».
+            const viaProxy = async () => {
+                const r = await fetch(sbProxied(url), sbProxyInit(init));
+                if (r.headers.get('X-Sb-Proxy') !== '1' || r.status === 501 || r.status === 502) throw new TypeError('Failed to fetch (через skkg.ru база тоже недоступна)');
+                return r;
+            };
             const direct = () => {
                 // Пока прямая связь не подтверждена, не ждём её дольше 10 секунд (заблокированный адрес может молчать).
                 if (sbRoute.directOk || (init && init.signal)) return fetch(url, init);
@@ -2023,8 +2029,9 @@
                 return r;
             } catch (e) {
                 if (init && init.signal && init.signal.aborted) throw e;
-                const r = await viaProxy();
-                if (r.status !== 400 && r.status !== 501 && r.status !== 502) sbSetProxy(true);
+                let r;
+                try { r = await viaProxy(); } catch (_) { throw e; }
+                sbSetProxy(true);
                 return r;
             }
         }

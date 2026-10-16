@@ -1284,7 +1284,7 @@ test('Без VPN база недоступна — запросы идут че�
     await page.route(/service-worker\.js/, r => r.fulfill({ contentType: 'application/javascript', body: 'self.addEventListener("install", () => self.skipWaiting());' }));
     await page.route(/sb\.php/, r => {
         proxied.push({ url: r.request().url(), auth: r.request().headers()['x-sb-authorization'], method: r.request().method(), body: r.request().postData() });
-        r.fulfill({ status: 200, contentType: 'application/json', body: '{"proxy":true}' });
+        r.fulfill({ status: 200, contentType: 'application/json', headers: { 'X-Sb-Proxy': '1' }, body: '{"proxy":true}' });
     });
     await page.goto(baseUrl + '/index.html', { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => typeof sbFetch === 'function');
@@ -1309,6 +1309,37 @@ test('Без VPN база недоступна — запросы идут че�
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => typeof sbFetch === 'function' && !sbRoute.proxy, null, { timeout: 8000 });
     expect((await page.evaluate(async () => (await (await sbFetch(SUPABASE_URL + '/rest/v1/x')).json()).direct)), 'с VPN запрос не идёт напрямую');
+    expect(await page.evaluate(() => localStorage.getItem('skkg-db-route') === null), 'отметка обхода не снялась');
+});
+
+test('Хостинг без PHP: sb.php не работает — понятная ошибка, а с VPN всё напрямую', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    let blocked = true;
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1)/, r => blocked ? r.abort('connectionrefused') : r.fulfill({ status: 200, contentType: 'application/json', body: '{"direct":true}' }));
+    await page.route(/vendor\/supabase\.js/, r => r.fulfill({ contentType: 'application/javascript', body: FAKE_SUPABASE }));
+    await page.route(/service-worker\.js/, r => r.fulfill({ contentType: 'application/javascript', body: 'self.addEventListener("install", () => self.skipWaiting());' }));
+    // Так отвечает хостинг, где PHP не включён: отдаёт сам файл, а на POST — свою страницу ошибки.
+    await page.route(/sb\.php/, r => r.request().method() === 'GET'
+        ? r.fulfill({ status: 200, contentType: 'application/octet-stream', body: '<?php // ...' })
+        : r.fulfill({ status: 405, contentType: 'text/html', body: '<html><head><title>405 Not Allowed</title></head></html>' }));
+    await page.goto(baseUrl + '/index.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => typeof sbFetch === 'function');
+    const res = await page.evaluate(async () => {
+        const out = [];
+        for (const m of ['GET', 'POST']) {
+            try { await sbFetch(SUPABASE_URL + '/auth/v1/token?grant_type=password', { method: m, body: m === 'POST' ? '{}' : undefined }); out.push('ok'); }
+            catch (e) { out.push(e instanceof TypeError ? 'net' : 'other:' + e.message); }
+        }
+        return { out, flag: localStorage.getItem('skkg-db-route') };
+    });
+    expect(res.out.join() === 'net,net', 'ожидалась ошибка связи, а не страница хостинга: ' + res.out.join());
+    expect(res.flag === null, 'неработающий обход запомнился на телефоне');
+    // Отметка обхода осталась с прошлого раза, а сейчас включён VPN: запросы всё равно доходят напрямую.
+    blocked = false;
+    await page.evaluate(() => { sbRoute.proxy = true; localStorage.setItem('skkg-db-route', 'proxy'); });
+    const direct = await page.evaluate(async () => (await (await sbFetch(SUPABASE_URL + '/rest/v1/x')).json()).direct);
+    expect(direct, 'с VPN запрос не дошёл напрямую');
     expect(await page.evaluate(() => localStorage.getItem('skkg-db-route') === null), 'отметка обхода не снялась');
 });
 
@@ -1373,7 +1404,7 @@ test('sb.php пересылает запросы в базу и не пуска�
         for (let i = 0; i < 50; i++) { r = await fetch(base + encodeURIComponent('/rest/v1/tasks?select=*&id=eq.5'), { method: 'PATCH', headers: { apikey: 'k1', 'X-Sb-Authorization': 'Bearer tok', 'Content-Type': 'application/json', Prefer: 'return=representation' }, body: '{"a":1}' }).catch(() => null); if (r) break; await new Promise(x => setTimeout(x, 100)); }
         expect(r, 'php не запустился (нужен PHP с curl)');
         expect(r.status === 201 && (await r.text()) === '{"ok":true}', 'ответ базы не дошёл: ' + r.status);
-        expect(r.headers.get('content-range') === '0-0/1' && !r.headers.get('access-control-allow-origin'), 'заголовки ответа переданы неверно');
+        expect(r.headers.get('content-range') === '0-0/1' && !r.headers.get('access-control-allow-origin') && r.headers.get('x-sb-proxy') === '1', 'заголовки ответа переданы неверно');
         const g = got[0];
         expect(g && g.url === '/rest/v1/tasks?select=*&id=eq.5' && g.method === 'PATCH' && g.body === '{"a":1}', 'запрос в базу передан неверно: ' + JSON.stringify(g && { url: g.url, method: g.method, body: g.body }));
         expect(g.headers.apikey === 'k1' && g.headers.authorization === 'Bearer tok' && g.headers.prefer === 'return=representation' && g.headers['content-type'] === 'application/json', 'заголовки запроса потерялись: ' + JSON.stringify(g.headers));
