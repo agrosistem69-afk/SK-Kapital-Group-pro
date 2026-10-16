@@ -417,7 +417,7 @@ const PLANZ="${planz}";</script>`;
 });
 
 // Открыть лист в просмотре и включить «Замечания». user — кто вошёл.
-async function openNotes(page, user = { id: 'u1', full_name: 'Грег' }) {
+async function openNotes(page, user = { id: 'u1', full_name: 'Грег' }, pick = true) {
     await page.evaluate(async u => {
         currentUserProfile = u;
         appData.drawings = __db.drawings.map(d => ({ ...d }));
@@ -425,6 +425,8 @@ async function openNotes(page, user = { id: 'u1', full_name: 'Грег' }) {
         await toggleDrawingNotes();
     }, user);
     await page.waitForFunction(() => notesState?.vb, null, { timeout: 15000 });
+    // Сначала открывается список замечаний листа; для проверок рисования открываем первое (или новое).
+    if (pick) await page.evaluate(() => notesSets().length ? notesOpenSet(notesSets()[0]) : notesNewSet());
 }
 const notesToScreen = (page, x, y) => page.evaluate(([x, y]) => {
     const svg = document.getElementById('notesSvg'), pt = svg.createSVGPoint();
@@ -623,6 +625,57 @@ test('Замечания: список скрыт, пока не открыть;
     expect(JSON.stringify(ids) === '["n1"]' && /Бордюр/.test(text) && !/Плитка/.test(text), 'фильтр по автору не сработал: ' + JSON.stringify(ids) + ' ' + text);
     await page.click('#notesList button[title="Скрыть список"]');
     expect(!(await visible(page, '#notesList')), 'список не скрылся');
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
+test('Замечания: сначала список замечаний листа, переименование, новое замечание с чистого листа', async () => {
+    const page = await openApp();
+    const S = 'лист 1 тестовый посадочный план';
+    await page.evaluate(S => __db.drawing_notes = [
+        { id: 'n1', project_id: 'p1', sheet: S, author_id: 'u1', author_name: 'Грег', kind: 'rect', color: '#dc2626', data: { x: 0, y: 0, w: 5, h: 5 }, text: 'Старая', resolved: false, created_at: '2026-10-14T05:00:00Z' },
+        { id: 'n2', project_id: 'p1', sheet: S, author_id: 'u2', author_name: 'Прораб', kind: 'ellipse', color: '#2563eb', data: { x: 10, y: 10, w: 5, h: 5, set: 'Бордюры' }, text: 'Бордюр', resolved: true, created_at: '2026-10-14T06:00:00Z' }], S);
+    await openNotes(page, undefined, false);
+    // Первым делом — список: «Замечание 1» (всё, что было нарисовано раньше) и «Бордюры».
+    expect(await visible(page, '#notesSets'), 'список замечаний не показан');
+    let names = await page.$$eval('#notesSets [data-notes-set]', els => els.map(e => e.dataset.notesSet));
+    expect(JSON.stringify(names) === '["Замечание 1","Бордюры"]', 'замечания в списке: ' + JSON.stringify(names));
+    expect(/Пометок: 1, открытых: 0/.test(await page.$eval('#notesSets [data-notes-set="Бордюры"]', e => e.innerText)), 'нет счётчика пометок');
+    // Чужое замечание переименовать нельзя (не ответственный за чертежи), своё — можно.
+    expect(!(await page.$('#notesSets [data-notes-set="Бордюры"] [data-notes-rename]')), 'чужое замечание можно переименовать');
+    page.once('dialog', d => d.accept('Плитка у входа'));
+    await page.click('#notesSets [data-notes-set="Замечание 1"] [data-notes-rename]');
+    await page.waitForFunction(() => __db.drawing_notes.find(r => r.id === 'n1').data.set === 'Плитка у входа');
+    names = await page.$$eval('#notesSets [data-notes-set]', els => els.map(e => e.dataset.notesSet));
+    expect(JSON.stringify(names) === '["Плитка у входа","Бордюры"]', 'после переименования: ' + JSON.stringify(names));
+    // Открываю замечание — на плане только его пометки.
+    await page.click('#notesSets [data-notes-set="Бордюры"] button');
+    expect(!(await visible(page, '#notesSets')), 'список не закрылся');
+    let ids = await page.evaluate(() => [...document.querySelectorAll('#notesMarks [data-note]')].map(e => e.dataset.note));
+    expect(JSON.stringify(ids) === '["n2"]', 'на плане пометки другого замечания: ' + JSON.stringify(ids));
+    expect(/Бордюры/.test(await page.textContent('#notesBackBtn')), 'в панели нет названия замечания');
+    // Назад к списку и новое замечание — чистый лист.
+    await page.click('#notesBackBtn');
+    await page.click('#notesNewSetBtn');
+    expect(await page.evaluate(() => notesState.set) === 'Замечание 3', 'название нового: ' + await page.evaluate(() => notesState.set));
+    expect(await page.evaluate(() => document.querySelectorAll('#notesMarks [data-note]').length) === 0, 'новое замечание не с чистого листа');
+    const vb = await page.evaluate(() => notesState.vb);
+    const P = (fx, fy) => [vb[0] + vb[2] * fx, vb[1] + vb[3] * fy];
+    await page.click('#notesToolbar [data-tool="rect"]');
+    await notesDrag(page, P(0.3, 0.3), P(0.5, 0.45));
+    await page.waitForFunction(() => __db.drawing_notes.length === 3);
+    const added = await page.evaluate(() => __db.drawing_notes[2]);
+    expect(added.data.set === 'Замечание 3', 'пометка сохранена не в новое замечание: ' + JSON.stringify(added.data));
+    // Растягивание и сдвиг не теряют, к какому замечанию относится пометка.
+    const kept = await page.evaluate(() => { const m = notesState.marks.find(x => x.data.set === 'Замечание 3'); const b = noteBounds(m);
+        return [noteResized(m, b, 'se', [b[2] + 5, b[3] + 5]).set, noteMoved(m, 1, 1).set, noteResized({ kind: 'text', data: { x: 1, y: 1, size: 2, set: 'А' } }, [0, 0, 4, 2], 'e', [8, 1]).set]; });
+    expect(kept.join() === 'Замечание 3,Замечание 3,А', 'при изменении размера потерялось замечание: ' + kept.join());
+    await page.click('#notesBackBtn');
+    names = await page.$$eval('#notesSets [data-notes-set]', els => els.map(e => e.dataset.notesSet));
+    expect(JSON.stringify(names) === '["Плитка у входа","Бордюры","Замечание 3"]', 'итоговый список: ' + JSON.stringify(names));
+    // Пустое новое замечание, на котором ничего не нарисовали, в списке не остаётся.
+    await page.click('#notesNewSetBtn');
+    await page.click('#notesBackBtn');
+    expect((await page.$$('#notesSets [data-notes-set]')).length === 3, 'пустое замечание осталось в списке');
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 

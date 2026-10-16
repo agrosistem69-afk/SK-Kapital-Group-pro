@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '42';
+        window.APP_VERSION = '43';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=42">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=42">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=42">
+    <link rel="stylesheet" href="vendor/app.css?v=43">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=43">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=43">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=42" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=42" defer></script>
-    <script src="vendor/jszip.min.js?v=42" defer></script>
+    <script src="vendor/html2canvas.min.js?v=43" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=43" defer></script>
+    <script src="vendor/jszip.min.js?v=43" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=42"></script>
+    <script src="vendor/supabase.js?v=43"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -1739,8 +1739,9 @@
                     <div id="notesToolbar" class="flex items-center gap-1 px-2 py-1.5 border-b border-slate-200 bg-slate-50 overflow-x-auto"></div>
                     <div class="relative flex-1 min-h-0">
                         <svg id="notesSvg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" class="absolute inset-0 w-full h-full touch-none select-none"><g id="notesPlan"></g><g id="notesMarks"></g><g id="notesDraft"></g></svg>
+                        <div id="notesSets" class="absolute inset-0 hidden overflow-y-auto bg-slate-50 p-4"></div>
                         <div id="notesMsg" class="absolute inset-0 hidden items-center justify-center text-sm text-slate-500 p-6 text-center bg-white"></div>
-                        <div class="absolute right-2 bottom-2 flex flex-col gap-1">
+                        <div id="notesZoomBtns" class="absolute right-2 bottom-2 flex flex-col gap-1">
                             <button onclick="notesZoomButton(1 / 1.6)" class="w-9 h-9 bg-white border border-slate-300 rounded-lg shadow-sm text-slate-700" title="Приблизить"><i class="fa-solid fa-plus"></i></button>
                             <button onclick="notesZoomButton(1.6)" class="w-9 h-9 bg-white border border-slate-300 rounded-lg shadow-sm text-slate-700" title="Отдалить"><i class="fa-solid fa-minus"></i></button>
                             <button onclick="notesFit()" class="w-9 h-9 bg-white border border-slate-300 rounded-lg shadow-sm text-slate-700" title="Весь лист"><i class="fa-solid fa-expand"></i></button>
@@ -8961,7 +8962,8 @@
 
         function notesReset(drawing) {
             notesState = drawing ? { drawing, projectId: drawing.project_id, sheet: normName(drawing.sheet), html: null, plan: null, vb: null, baseVb: null,
-                tool: 'pan', color: NOTE_COLORS[0], font: 'm', marks: [], draft: null, selected: null, open: false, error: '', author: '' } : null;
+                tool: 'pan', color: NOTE_COLORS[0], font: 'm', marks: [], draft: null, selected: null, open: false, error: '', author: '',
+                set: null, newSets: [] } : null;
             document.getElementById('notesStage').classList.add('hidden');
             document.getElementById('notesStage').classList.remove('flex');
             document.getElementById('drawingViewerFrame').classList.remove('hidden');
@@ -8971,10 +8973,83 @@
         const notesMyId = () => currentUserProfile?.id || null;
         const notesCanEdit = m => !!m && (m.author_id === notesMyId() || canManageDrawings);
         // Пометки, которые сейчас показаны: все или только выбранного автора.
-        const notesVisible = () => notesState.marks.filter(m => !notesState.author || m.author_id === notesState.author);
+        const notesVisible = () => notesSetMarks().filter(m => !notesState.author || m.author_id === notesState.author);
+
+        // ---- отдельные замечания на листе: «Замечание 1», «Замечание 2»… ----
+        // У каждой пометки в data.set — название её замечания. Пометки, нарисованные до появления
+        // этой возможности, без названия: они составляют первое замечание («Замечание 1»), пока его не переименуют.
+        const NOTES_FIRST_SET = 'Замечание 1';
+        const noteSetName = m => (m.data && typeof m.data.set === 'string' && m.data.set.trim()) || NOTES_FIRST_SET;
+        const notesSetMarks = (name = notesState.set) => notesState.marks.filter(m => noteSetName(m) === name);
+        // Все замечания листа по порядку появления; только что созданные (ещё без пометок) — в конце.
+        function notesSets() {
+            const st = notesState, order = [];
+            st.marks.forEach(m => { const n = noteSetName(m); if (!order.includes(n)) order.push(n); });
+            st.newSets.forEach(n => { if (!order.includes(n)) order.push(n); });
+            return order;
+        }
+        function notesOpenSet(name) {
+            const st = notesState;
+            st.set = name; st.selected = null; st.author = ''; st.tool = 'pan';
+            if (st.baseVb) st.vb = st.baseVb.slice();
+            notesRender();
+        }
+        function notesBackToSets() {
+            const st = notesState;
+            // Новое замечание, на котором так ничего и не нарисовали, в списке не остаётся.
+            st.newSets = st.newSets.filter(n => n !== st.set || notesSetMarks(n).length);
+            st.set = null; st.selected = null;
+            notesRender();
+        }
+        function notesNewSet() {
+            const sets = notesSets();
+            let i = sets.length + 1;
+            while (sets.includes('Замечание ' + i)) i++;
+            notesState.newSets.push('Замечание ' + i);
+            notesOpenSet('Замечание ' + i);
+        }
+        const notesCanRenameSet = name => canManageDrawings || notesSetMarks(name).every(m => m.author_id === notesMyId());
+        async function notesRenameSet(name) {
+            const st = notesState;
+            if (!notesCanRenameSet(name)) { alert('Переименовать может автор пометок или ответственный за чертежи.'); return; }
+            const v = (prompt('Название замечания', name) || '').trim().slice(0, 80);
+            if (!v || v === name) return;
+            if (notesSets().includes(v)) { alert('Замечание с таким названием уже есть.'); return; }
+            st.newSets = st.newSets.map(n => n === name ? v : n);
+            if (st.set === name) st.set = v;
+            const marks = notesSetMarks(name);
+            marks.forEach(m => { m.data = { ...m.data, set: v }; });
+            notesRender();
+            const results = await Promise.all(marks.map(m => sb.from('drawing_notes').update({ data: m.data }).eq('id', m.id)));
+            const err = results.find(r => r.error)?.error;
+            if (err) { st.error = 'Не удалось переименовать: ' + err.message; notesRender(); }
+        }
+        function notesRenderSets() {
+            const st = notesState, el = document.getElementById('notesSets');
+            el.classList.toggle('hidden', st.set !== null || !st.plan);
+            if (st.set !== null || !st.plan) { el.innerHTML = ''; return; }
+            const sets = notesSets();
+            el.innerHTML = `<div class="max-w-lg mx-auto">
+                <h3 class="text-base font-bold text-slate-800 mb-1">Замечания к листу</h3>
+                <p class="text-xs text-slate-500 mb-3">Откройте замечание, чтобы посмотреть или дополнить его, или создайте новое на чистом листе.</p>
+                ${st.error ? `<div class="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mb-2">${escapeHtml(st.error)}</div>` : ''}
+                <div class="space-y-2 mb-3">${sets.map(n => {
+                    const ms = notesSetMarks(n), open = ms.filter(m => !m.resolved).length;
+                    const who = [...new Set(ms.map(m => m.author_name).filter(Boolean))].join(', ');
+                    return `<div data-notes-set="${escapeHtml(n)}" class="flex items-stretch border border-slate-200 rounded-xl hover:border-brand-400 bg-white">
+                        <button onclick="notesOpenSet(this.closest('[data-notes-set]').dataset.notesSet)" class="flex-1 min-w-0 text-left px-3 py-2.5">
+                            <span class="block font-semibold text-slate-800 truncate">${escapeHtml(n)}</span>
+                            <span class="block text-xs text-slate-500 truncate">${ms.length ? `Пометок: ${ms.length}, открытых: ${open}${who ? ' · ' + escapeHtml(who) : ''}` : 'Пока пусто'}</span>
+                        </button>
+                        ${notesCanRenameSet(n) ? `<button data-notes-rename onclick="notesRenameSet(this.closest('[data-notes-set]').dataset.notesSet)" title="Переименовать" class="w-11 flex-shrink-0 text-slate-500 hover:text-brand-700 border-l border-slate-200"><i class="fa-solid fa-pen"></i></button>` : ''}
+                    </div>`; }).join('')}</div>
+                ${!sets.length ? '<p class="text-sm text-slate-400 mb-3">На этом листе замечаний пока нет.</p>' : ''}
+                <button id="notesNewSetBtn" onclick="notesNewSet()" class="w-full py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold"><i class="fa-solid fa-plus mr-1"></i>Новое замечание</button>
+            </div>`;
+        }
         function notesAuthors() {
             const seen = new Map();
-            notesState.marks.forEach(m => { if (m.author_id && !seen.has(m.author_id)) seen.set(m.author_id, m.author_name || 'Без имени'); });
+            notesSetMarks().forEach(m => { if (m.author_id && !seen.has(m.author_id)) seen.set(m.author_id, m.author_name || 'Без имени'); });
             return [...seen].sort((a, b) => (b[0] === notesMyId()) - (a[0] === notesMyId()) || a[1].localeCompare(b[1], 'ru'));
         }
         function notesSetAuthor(id) {
@@ -9132,6 +9207,11 @@
             return d;
         }
         function noteResized(orig, box, h, p) {
+            const d = noteResizedRaw(orig, box, h, p);
+            if (orig.data && orig.data.set != null) d.set = orig.data.set;
+            return d;
+        }
+        function noteResizedRaw(orig, box, h, p) {
             const d = JSON.parse(JSON.stringify(orig.data));
             if (orig.kind === 'arrow') { d.pts[h === 'p0' ? 0 : 1] = p; return d; }
             const hx = h.includes('w') ? 'w' : h.includes('e') ? 'e' : '', hy = h.includes('n') ? 'n' : h.includes('s') ? 's' : '';
@@ -9162,7 +9242,12 @@
             if (!st) return;
             const svg = document.getElementById('notesSvg');
             svg.style.cursor = st.tool === 'pan' ? 'grab' : 'crosshair';
+            notesRenderSets();
+            document.getElementById('notesZoomBtns').classList.toggle('hidden', st.set === null);
+            if (st.set === null) { document.getElementById('notesToolbar').innerHTML = ''; document.getElementById('notesList').classList.add('hidden'); return; }
             document.getElementById('notesToolbar').innerHTML = `
+                <button id="notesBackBtn" onclick="notesBackToSets()" title="К списку замечаний" class="h-9 px-2 flex-shrink-0 rounded-lg text-sm font-semibold text-brand-700 hover:bg-slate-200 whitespace-nowrap max-w-[12rem] truncate"><i class="fa-solid fa-chevron-left mr-1"></i>${escapeHtml(st.set)}</button>
+                <span class="w-px h-6 bg-slate-300 mx-1 flex-shrink-0"></span>
                 ${NOTE_TOOLS.map(([t, ic, title]) => `<button onclick="notesSetTool('${t}')" title="${title}" data-tool="${t}" class="w-9 h-9 flex-shrink-0 rounded-lg ${st.tool === t ? 'bg-brand-600 text-white' : 'text-slate-700 hover:bg-slate-200'}"><i class="fa-solid ${ic}"></i></button>`).join('')}
                 <span class="w-px h-6 bg-slate-300 mx-1 flex-shrink-0"></span>
                 ${NOTE_COLORS.map(c => `<button onclick="notesSetColor('${c}')" title="Цвет" data-color="${c}" class="w-7 h-7 flex-shrink-0 rounded-full border-2 ${st.color === c ? 'border-slate-900 scale-110' : 'border-white'}" style="background:${c}"></button>`).join('')}
@@ -9257,7 +9342,7 @@
         async function notesAdd(mark) {
             const st = notesState;
             const row = { project_id: st.projectId, sheet: st.sheet, drawing_id: st.drawing.id, author_id: notesMyId(),
-                author_name: currentUserProfile?.full_name || currentUserProfile?.email || '', kind: mark.kind, color: mark.color, data: mark.data, text: mark.text || null, resolved: false };
+                author_name: currentUserProfile?.full_name || currentUserProfile?.email || '', kind: mark.kind, color: mark.color, data: { ...mark.data, set: st.set || NOTES_FIRST_SET }, text: mark.text || null, resolved: false };
             const local = { ...row, id: 'tmp-' + Date.now(), created_at: new Date().toISOString() };
             st.marks.push(local);
             st.selected = local.id;
@@ -9288,7 +9373,7 @@
             if (error) { st.error = 'Не удалось удалить: ' + error.message; st.marks.push(m); notesRender(); }
         }
         function notesUndo() {
-            const mine = notesState?.marks.filter(m => m.author_id === notesMyId());
+            const mine = notesState?.set != null && notesSetMarks().filter(m => m.author_id === notesMyId());
             if (mine?.length) notesDelete(mine[mine.length - 1].id, false);
         }
 
