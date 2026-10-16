@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '39';
+        window.APP_VERSION = '40';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -53,7 +53,7 @@
             (document.body || document.documentElement).appendChild(d);
             document.getElementById('bootReload').onclick = function () { location.reload(); };
             document.getElementById('bootReset').onclick = window.__resetAppFiles;
-            var checks = [['Сайт skkg.ru', 'version.json?t=' + Date.now()], ['База данных', 'https://pgejlzsfofkgdsgwptfa.supabase.co/auth/v1/health']];
+            var checks = [['Сайт skkg.ru', 'version.json?t=' + Date.now()], ['База данных', 'https://pgejlzsfofkgdsgwptfa.supabase.co/auth/v1/health'], ['База через skkg.ru', 'sb.php?u=' + encodeURIComponent('/auth/v1/health')]];
             var res = [];
             checks.forEach(function (c, i) {
                 var done = false, mark = function (ok) { if (done) return; done = true; res[i] = c[0] + ': ' + (ok ? 'есть связь' : 'нет связи'); document.getElementById('bootNet').textContent = res.filter(Boolean).join(' · '); };
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=39">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=39">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=39">
+    <link rel="stylesheet" href="vendor/app.css?v=40">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=40">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=40">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=39" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=39" defer></script>
-    <script src="vendor/jszip.min.js?v=39" defer></script>
+    <script src="vendor/html2canvas.min.js?v=40" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=40" defer></script>
+    <script src="vendor/jszip.min.js?v=40" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=39"></script>
+    <script src="vendor/supabase.js?v=40"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -1972,7 +1972,72 @@
         const SUPABASE_URL = 'https://pgejlzsfofkgdsgwptfa.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_5oxHg-2jmaWYrrf6DwRqcA_14E1opNL';
 
+        // Обход блокировки: у некоторых провайдеров без VPN не открывается *.supabase.co («Failed to fetch»).
+        // Тогда запросы к базе идут через наш сайт (файл sb.php), а он пересылает их в Supabase.
+        // Сначала пробуем напрямую; не вышло — через skkg.ru, и запоминаем это на телефоне.
+        // При следующем открытии снова проверяем прямую связь и, если она есть, возвращаемся к ней.
+        const SB_PROXY = 'sb.php?u=';
+        const SB_ROUTE_KEY = 'skkg-db-route';
+        const sbRoute = { proxy: false, directOk: false };
+        try { sbRoute.proxy = localStorage.getItem(SB_ROUTE_KEY) === 'proxy'; } catch (_) {}
+        function sbSetProxy(on) {
+            sbRoute.proxy = on;
+            try { on ? localStorage.setItem(SB_ROUTE_KEY, 'proxy') : localStorage.removeItem(SB_ROUTE_KEY); } catch (_) {}
+        }
+        // Адрес базы → адрес через наш сайт (для запросов и для ссылок на файлы).
+        function sbProxied(url) {
+            const s = String(url);
+            if (!s.startsWith(SUPABASE_URL + '/')) return s;
+            return SB_PROXY + encodeURIComponent(s.slice(SUPABASE_URL.length));
+        }
+        // Ссылка на файл в базе: при обходе блокировки — тоже через наш сайт.
+        function sbUrl(url) { return url && sbRoute.proxy ? sbProxied(url) : url; }
+        function sbProxyInit(init) {
+            const out = Object.assign({}, init || {});
+            const h = new Headers((init && init.headers) || {});
+            if (h.has('Authorization')) h.set('X-Sb-Authorization', h.get('Authorization'));
+            out.headers = h;
+            return out;
+        }
+        async function sbFetch(input, init) {
+            const url = typeof input === 'string' ? input : (input && input.url) || String(input);
+            if (!url.startsWith(SUPABASE_URL + '/')) return fetch(input, init);
+            const viaProxy = () => fetch(sbProxied(url), sbProxyInit(init));
+            const direct = () => {
+                // Пока прямая связь не подтверждена, не ждём её дольше 10 секунд (заблокированный адрес может молчать).
+                if (sbRoute.directOk || (init && init.signal)) return fetch(url, init);
+                const ctrl = new AbortController();
+                const timer = setTimeout(() => ctrl.abort(), 10000);
+                return fetch(url, Object.assign({}, init, { signal: ctrl.signal })).finally(() => clearTimeout(timer));
+            };
+            if (sbRoute.proxy) {
+                try { return await viaProxy(); } catch (e) {
+                    const r = await direct();
+                    sbRoute.directOk = true; sbSetProxy(false);
+                    return r;
+                }
+            }
+            try {
+                const r = await direct();
+                sbRoute.directOk = true;
+                return r;
+            } catch (e) {
+                if (init && init.signal && init.signal.aborted) throw e;
+                const r = await viaProxy();
+                if (r.status !== 400 && r.status !== 501 && r.status !== 502) sbSetProxy(true);
+                return r;
+            }
+        }
+        // Работаем через наш сайт — проверяем в фоне, не открылась ли прямая связь (например, включили VPN).
+        if (sbRoute.proxy) {
+            const ctrl = new AbortController();
+            setTimeout(() => ctrl.abort(), 6000);
+            fetch(SUPABASE_URL + '/auth/v1/health', { headers: { apikey: SUPABASE_ANON_KEY }, signal: ctrl.signal, cache: 'no-store' })
+                .then(r => { if (r.status < 500) { sbRoute.directOk = true; sbSetProxy(false); } }, () => {});
+        }
+
         const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+            global: { fetch: sbFetch },
             auth: {
                 persistSession: true,
                 autoRefreshToken: true,
@@ -2163,9 +2228,20 @@
             const password = document.getElementById('loginPassword').value;
             document.getElementById('authError').classList.add('hidden');
 
-            const { error } = await sb.auth.signInWithPassword({ email, password });
+            const btn = e.submitter || document.querySelector('#loginFormEl button[type="submit"]');
+            const label = btn ? btn.innerHTML : '';
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Вход…'; }
+            let error;
+            try {
+                ({ error } = await sb.auth.signInWithPassword({ email, password }));
+            } catch (err) {
+                error = err;
+            } finally {
+                if (btn) { btn.disabled = false; btn.innerHTML = label; }
+            }
             if (error) {
-                showLoginError('Ошибка входа: ' + error.message);
+                const net = /fetch|network|load failed|abort/i.test(String(error.message || error));
+                showLoginError(net ? 'Нет связи с базой данных. Проверьте интернет и попробуйте ещё раз.' : 'Ошибка входа: ' + error.message);
             }
         }
 
@@ -2432,6 +2508,8 @@
         }
 
         function subscribeRealtime() {
+            // Через наш сайт мгновенные обновления не проходят — данные обновляются при действиях и при открытии разделов.
+            if (sbRoute.proxy) return;
             sb.channel('public:tasks').on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => refreshAllData()).subscribe();
             sb.channel('public:projects').on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, () => refreshAllData()).subscribe();
             sb.channel('public:workers').on('postgres_changes', { event: '*', schema: 'public', table: 'workers' }, () => refreshAllData()).subscribe();
@@ -3420,7 +3498,7 @@
 
             const cards = await Promise.all(data.map(async (att) => {
                 const { data: signed } = await sb.storage.from(TASK_FILES_BUCKET).createSignedUrl(att.file_path, 3600);
-                const url = signed ? signed.signedUrl : '#';
+                const url = signed ? sbUrl(signed.signedUrl) : '#';
                 const isImg = isImageFile(att.file_name, att.file_type);
 
                 const deleteBtn = canDelete
@@ -3811,7 +3889,7 @@
 
             const rows = await Promise.all(data.map(async (inv) => {
                 const { data: signed } = await sb.storage.from(INVOICE_FILES_BUCKET).createSignedUrl(inv.file_path, 3600);
-                const url = signed ? signed.signedUrl : '#';
+                const url = signed ? sbUrl(signed.signedUrl) : '#';
                 const isImg = isImageFile(inv.file_name, inv.file_type);
                 const canDelete = canManage || inv.uploaded_by === myId;
 
@@ -3916,7 +3994,7 @@
             const rowsHtml = await Promise.all(rows.map(async (r) => {
                 const proj = appData.projects.find(p => p.id === r.project_id);
                 const { data: signed } = await sb.storage.from(INVOICE_FILES_BUCKET).createSignedUrl(r.file_path, 3600);
-                const url = signed ? signed.signedUrl : '#';
+                const url = signed ? sbUrl(signed.signedUrl) : '#';
                 const isImg = isImageFile(r.file_name, r.file_type);
                 const thumb = isImg
                     ? fadeInImgHtml(url, r.file_name, 'w-10 h-10 rounded-md border border-slate-200')
@@ -4024,7 +4102,7 @@
                 try {
                     const { data: signed } = await sb.storage.from(INVOICE_FILES_BUCKET).createSignedUrl(r.file_path, 3600);
                     if (!signed) throw new Error('Нет ссылки на файл');
-                    const resp = await fetch(signed.signedUrl);
+                    const resp = await fetch(sbUrl(signed.signedUrl));
                     const blob = await resp.blob();
                     const safeName = (r.file_name || `document_${r.id}`).replace(/[\\/:*?"<>|]/g, '_');
                     // Если несколько файлов с одинаковым именем — добавляем короткий суффикс, чтобы не перезаписать друг друга в архиве
@@ -4609,7 +4687,7 @@
             const canDelete = timesheetCanEditGroup(tsPhotosModalGroupKey);
             const cards = await Promise.all(data.map(async (p) => {
                 const { data: signed } = await sb.storage.from(TIMESHEET_PHOTOS_BUCKET).createSignedUrl(p.file_path, 3600);
-                const url = signed ? signed.signedUrl : '#';
+                const url = signed ? sbUrl(signed.signedUrl) : '#';
                 const deleteBtn = canDelete
                     ? `<button onclick="deleteTimesheetGroupPhoto('${p.id}', '${p.file_path}')" class="absolute top-1 right-1 w-6 h-6 bg-slate-900/70 hover:bg-rose-600 text-white rounded-full flex items-center justify-center text-xs transition-colors" title="Удалить фото"><i class="fa-solid fa-xmark"></i></button>`
                     : '';
@@ -5022,7 +5100,7 @@
                 let fileLink = '';
                 if (p.file_path) {
                     const { data: signed } = await sb.storage.from(PASS_FILES_BUCKET).createSignedUrl(p.file_path, 3600);
-                    const url = signed ? signed.signedUrl : '#';
+                    const url = signed ? sbUrl(signed.signedUrl) : '#';
                     fileLink = `<a href="${url}" target="_blank" rel="noopener" class="text-brand-600 hover:text-brand-700" title="Открыть файл"><i class="fa-solid fa-paperclip"></i></a>`;
                 }
 
@@ -5295,7 +5373,7 @@
 
             const items = await Promise.all(data.map(async (att) => {
                 const { data: signed } = await sb.storage.from(ORDER_FILES_BUCKET).createSignedUrl(att.file_path, 3600);
-                const url = signed ? signed.signedUrl : '#';
+                const url = signed ? sbUrl(signed.signedUrl) : '#';
                 const isImg = isImageFile(att.file_name, att.file_type);
                 return isImg
                     ? `<a href="${url}" target="_blank" rel="noopener">${fadeInImgHtml(url, att.file_name, 'w-full h-16 rounded-lg border border-slate-200')}</a>`
@@ -5538,7 +5616,7 @@
 
             const items = await Promise.all(data.map(async (att) => {
                 const { data: signed } = await sb.storage.from(INSPECTION_FILES_BUCKET).createSignedUrl(att.file_path, 3600);
-                const url = signed ? signed.signedUrl : '#';
+                const url = signed ? sbUrl(signed.signedUrl) : '#';
                 const isImg = isImageFile(att.file_name, att.file_type);
                 return isImg
                     ? `<a href="${url}" target="_blank" rel="noopener">${fadeInImgHtml(url, att.file_name, 'w-full h-16 rounded-lg border border-slate-200')}</a>`
@@ -5810,7 +5888,7 @@
 
             const cards = await Promise.all(data.map(async (doc) => {
                 const { data: signed } = await sb.storage.from(EXEC_DOCS_BUCKET).createSignedUrl(doc.file_path, 3600);
-                const url = signed ? signed.signedUrl : '#';
+                const url = signed ? sbUrl(signed.signedUrl) : '#';
                 const isImg = isImageFile(doc.file_name, doc.file_type);
 
                 const deleteBtn = canDelete
@@ -9445,7 +9523,7 @@
             const rowsHtml = await Promise.all(rows.map(async (r) => {
                 const proj = appData.projects.find(p => p.id === r.project_id);
                 const { data: signed } = await sb.storage.from(EXEC_DOCS_BUCKET).createSignedUrl(r.file_path, 3600);
-                const url = signed ? signed.signedUrl : '#';
+                const url = signed ? sbUrl(signed.signedUrl) : '#';
                 const isImg = isImageFile(r.file_name, r.file_type);
                 const thumb = isImg
                     ? fadeInImgHtml(url, r.file_name, 'w-10 h-10 rounded-md border border-slate-200')
@@ -9641,7 +9719,7 @@
 
             const cards = await Promise.all(data.map(async (att) => {
                 const { data: signed } = await sb.storage.from(PTO_TASK_FILES_BUCKET).createSignedUrl(att.file_path, 3600);
-                const url = signed ? signed.signedUrl : '#';
+                const url = signed ? sbUrl(signed.signedUrl) : '#';
                 const isImg = isImageFile(att.file_name, att.file_type);
                 const inner = isImg
                     ? fadeInImgHtml(url, att.file_name, 'w-full h-16')

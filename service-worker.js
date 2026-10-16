@@ -9,7 +9,7 @@
 // При каждой публикации меняйте версию: CACHE_NAME здесь, APP_VERSION и ?v= в index.html,
 // version.json. Автотест проверяет, что они совпадают.
 
-const VERSION = '39';
+const VERSION = '40';
 const CACHE_NAME = 'workcontrol-cache-v' + VERSION;
 const CORE = [
     'vendor/app.css',
@@ -58,6 +58,8 @@ self.addEventListener('fetch', (event) => {
     const url = new URL(request.url);
     if (url.origin !== self.location.origin || request.method !== 'GET') return;
     if (url.pathname.endsWith('/version.json')) return;
+    // Запросы к базе через наш сайт (обход блокировки) — всегда напрямую в сеть.
+    if (url.pathname.endsWith('/sb.php')) return;
 
     // Страница приложения: сначала сеть. Если связи нет или сервер долго молчит — сохранённая копия.
     if (request.mode === 'navigate' || request.destination === 'document') {

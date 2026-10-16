@@ -1273,6 +1273,104 @@ test('План-график на телефоне: диаграмма, люди 
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
+// ---- Вход без VPN: база через наш сайт ----
+test('Без VPN база недоступна — запросы идут через skkg.ru (sb.php), с VPN — снова напрямую', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    let blocked = true;
+    const proxied = [];
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1)/, r => blocked ? r.abort('connectionrefused') : r.fulfill({ status: 200, contentType: 'application/json', body: '{"direct":true}' }));
+    await page.route(/vendor\/supabase\.js/, r => r.fulfill({ contentType: 'application/javascript', body: FAKE_SUPABASE }));
+    await page.route(/service-worker\.js/, r => r.fulfill({ contentType: 'application/javascript', body: 'self.addEventListener("install", () => self.skipWaiting());' }));
+    await page.route(/sb\.php/, r => {
+        proxied.push({ url: r.request().url(), auth: r.request().headers()['x-sb-authorization'], method: r.request().method(), body: r.request().postData() });
+        r.fulfill({ status: 200, contentType: 'application/json', body: '{"proxy":true}' });
+    });
+    await page.goto(baseUrl + '/index.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => typeof sbFetch === 'function');
+    const res = await page.evaluate(async () => {
+        const r = await sbFetch(SUPABASE_URL + '/rest/v1/tasks?select=*&id=eq.5', { method: 'POST', headers: { Authorization: 'Bearer tok', apikey: 'k' }, body: '{"a":1}' });
+        return { body: await r.json(), flag: localStorage.getItem('skkg-db-route'), link: sbUrl(SUPABASE_URL + '/storage/v1/object/sign/f/a.pdf?token=x') };
+    });
+    expect(res.body.proxy, 'при заблокированной базе запрос не пошёл через sb.php');
+    expect(res.flag === 'proxy', 'обход не запомнился на устройстве');
+    const last = proxied[proxied.length - 1];
+    expect(decodeURIComponent(last.url.split('u=')[1]) === '/rest/v1/tasks?select=*&id=eq.5', 'путь к базе передан неверно: ' + last.url);
+    expect(last.auth === 'Bearer tok' && last.method === 'POST' && last.body === '{"a":1}', 'вход (Authorization), метод или данные не переданы через sb.php');
+    expect(res.link.startsWith('sb.php?u=') && decodeURIComponent(res.link.split('u=')[1]) === '/storage/v1/object/sign/f/a.pdf?token=x', 'ссылка на файл не идёт через наш сайт: ' + res.link);
+    // Следующее открытие сразу идёт через наш сайт, без ожидания.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => typeof sbFetch === 'function');
+    const n = proxied.length;
+    expect((await page.evaluate(async () => (await (await sbFetch(SUPABASE_URL + '/rest/v1/x')).json()).proxy)), 'после повторного открытия запрос не через sb.php');
+    expect(proxied.length > n, 'sb.php не вызван');
+    // Включили VPN — приложение само возвращается к прямой связи.
+    blocked = false;
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => typeof sbFetch === 'function' && !sbRoute.proxy, null, { timeout: 8000 });
+    expect((await page.evaluate(async () => (await (await sbFetch(SUPABASE_URL + '/rest/v1/x')).json()).direct)), 'с VPN запрос не идёт напрямую');
+    expect(await page.evaluate(() => localStorage.getItem('skkg-db-route') === null), 'отметка обхода не снялась');
+});
+
+test('Нет связи с базой — кнопка «Войти» показывает понятную ошибку, а не молчит', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1)/, r => r.fulfill({ status: 200, body: '' }));
+    await page.route(/vendor\/supabase\.js/, r => r.fulfill({ contentType: 'application/javascript', body: FAKE_SUPABASE }));
+    await page.route(/service-worker\.js/, r => r.fulfill({ contentType: 'application/javascript', body: 'self.addEventListener("install", () => self.skipWaiting());' }));
+    await page.goto(baseUrl + '/index.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => typeof handleLogin === 'function');
+    await page.evaluate(() => {
+        sb.auth.signInWithPassword = () => new Promise((_, reject) => setTimeout(() => reject(new TypeError('Failed to fetch')), 300));
+        ['authCheckingScreen', 'appRoot'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
+        document.getElementById('loginScreen').classList.remove('hidden');
+    });
+    await page.fill('#loginEmail', 'a@b.ru');
+    await page.fill('#loginPassword', '123456');
+    await page.click('#loginFormEl button[type="submit"]');
+    await page.waitForFunction(() => document.querySelector('#loginFormEl button[type="submit"]').disabled, null, { timeout: 2000 });
+    await page.waitForFunction(() => !document.getElementById('authError').classList.contains('hidden'), null, { timeout: 5000 });
+    const txt = await page.textContent('#authError');
+    expect(/Нет связи с базой/.test(txt), 'текст ошибки: ' + txt);
+    expect(await page.evaluate(() => !document.querySelector('#loginFormEl button[type="submit"]').disabled), 'кнопка «Войти» осталась заблокированной');
+});
+
+test('sb.php пересылает запросы в базу и не пускает в чужие адреса', async () => {
+    const got = [];
+    const upstream = http.createServer((req, res) => {
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', () => {
+            got.push({ url: req.url, method: req.method, headers: req.headers, body });
+            res.writeHead(201, { 'Content-Type': 'application/json', 'Content-Range': '0-0/1', 'Access-Control-Allow-Origin': '*' });
+            res.end('{"ok":true}');
+        });
+    });
+    await new Promise(r => upstream.listen(0, '127.0.0.1', r));
+    const port = 20000 + Math.floor(Math.random() * 20000);
+    const { spawn } = require('child_process');
+    const php = spawn('php', ['-S', `127.0.0.1:${port}`, '-t', ROOT], { env: Object.assign({}, process.env, { SB_UPSTREAM: `http://127.0.0.1:${upstream.address().port}` }), stdio: 'ignore' });
+    try {
+        const base = `http://127.0.0.1:${port}/sb.php?u=`;
+        let r;
+        for (let i = 0; i < 50; i++) { r = await fetch(base + encodeURIComponent('/rest/v1/tasks?select=*&id=eq.5'), { method: 'PATCH', headers: { apikey: 'k1', 'X-Sb-Authorization': 'Bearer tok', 'Content-Type': 'application/json', Prefer: 'return=representation' }, body: '{"a":1}' }).catch(() => null); if (r) break; await new Promise(x => setTimeout(x, 100)); }
+        expect(r, 'php не запустился (нужен PHP с curl)');
+        expect(r.status === 201 && (await r.text()) === '{"ok":true}', 'ответ базы не дошёл: ' + r.status);
+        expect(r.headers.get('content-range') === '0-0/1' && !r.headers.get('access-control-allow-origin'), 'заголовки ответа переданы неверно');
+        const g = got[0];
+        expect(g && g.url === '/rest/v1/tasks?select=*&id=eq.5' && g.method === 'PATCH' && g.body === '{"a":1}', 'запрос в базу передан неверно: ' + JSON.stringify(g && { url: g.url, method: g.method, body: g.body }));
+        expect(g.headers.apikey === 'k1' && g.headers.authorization === 'Bearer tok' && g.headers.prefer === 'return=representation' && g.headers['content-type'] === 'application/json', 'заголовки запроса потерялись: ' + JSON.stringify(g.headers));
+        for (const bad of ['//evil.com/x', '/../etc/passwd', 'https://evil.com', '/admin/v1/x', '/rest/v1/../../x']) {
+            const b = await fetch(base + encodeURIComponent(bad));
+            expect(b.status === 400, `чужой адрес ${bad} не отклонён: ${b.status}`);
+        }
+        expect(got.length === 1, 'в базу ушли лишние запросы');
+    } finally {
+        php.kill();
+        upstream.close();
+    }
+});
+
 // ================= ЗАПУСК =================
 // Для снимков экрана файл можно подключить из другого скрипта: тогда проверки не запускаются.
 module.exports = { buildCss, openApp, openSchedule, start: async () => { css = buildCss(); const server = await startServer(); baseUrl = `http://127.0.0.1:${server.address().port}`; browser = await chromium.launch(); return { server, browser }; } };
