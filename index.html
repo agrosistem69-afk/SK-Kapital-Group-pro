@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '45';
+        window.APP_VERSION = '46';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=45">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=45">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=45">
+    <link rel="stylesheet" href="vendor/app.css?v=46">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=46">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=46">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=45" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=45" defer></script>
-    <script src="vendor/jszip.min.js?v=45" defer></script>
+    <script src="vendor/html2canvas.min.js?v=46" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=46" defer></script>
+    <script src="vendor/jszip.min.js?v=46" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=45"></script>
+    <script src="vendor/supabase.js?v=46"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -784,6 +784,22 @@
                     </form>
                     <div id="projectDrawingsList" class="space-y-4"></div>
                 </div>
+            </div>
+
+            <!-- Ежедневный отчёт: у каждого свой, за выбранный день — люди по бригадам из табеля, техника, заметки -->
+            <div id="dailyReportSection" data-roles="manager,worker,lead,pto" class="hidden bg-white rounded-xl p-5 shadow-sm border border-slate-200 mb-6">
+                <div class="flex items-center justify-between gap-3 mb-3 flex-wrap">
+                    <button onclick="toggleDailyReportSection()" class="flex items-center gap-2 text-left">
+                        <i id="dailyReportChevron" class="fa-solid fa-chevron-down text-slate-400 text-xs transition-transform"></i>
+                        <h3 class="text-base font-bold text-slate-900">Ежедневный отчёт</h3>
+                    </button>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <button onclick="changeDailyReportDate(-1)" title="Предыдущий день" class="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-300 text-slate-500 hover:bg-slate-50"><i class="fa-solid fa-chevron-left text-xs"></i></button>
+                        <input id="dailyReportDate" type="date" onchange="setDailyReportDate(this.value)" class="border border-slate-300 rounded-lg text-sm px-2 py-1">
+                        <button onclick="changeDailyReportDate(1)" title="Следующий день" class="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-300 text-slate-500 hover:bg-slate-50"><i class="fa-solid fa-chevron-right text-xs"></i></button>
+                    </div>
+                </div>
+                <div id="dailyReportBody"></div>
             </div>
 
             <!-- Табель учёта рабочих: помесячная сетка явок по объекту -->
@@ -2667,6 +2683,8 @@
             setActiveNavTab('projects');
             timesheetViewDate = new Date();
             renderTimesheetSection(projId);
+            dailyReport.date = todayYmd(); dailyReport.author = '';
+            renderDailyReport(projId);
             renderProjectInspections(projId);
             renderProjectOrders(projId);
             renderProjectInvoices(projId);
@@ -4359,6 +4377,135 @@
             timesheetSectionCollapsed = !timesheetSectionCollapsed;
             document.getElementById('timesheetBody').classList.toggle('hidden', timesheetSectionCollapsed);
             document.getElementById('timesheetSectionChevron').style.transform = timesheetSectionCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
+        }
+
+
+        // ---- Ежедневный отчёт ----
+        // У каждого свой отчёт за день по объекту (таблица daily_reports, supabase/daily_reports.sql).
+        // Люди по бригадам считаются из табеля этого дня (кто отмечен явкой); у сотрудника со своей бригадой — только она.
+        // При сохранении количество людей запоминается в отчёте. Руководитель и руководство открывают отчёты других.
+        const dailyReport = { date: '', author: '', collapsed: false, report: null, others: [], crews: [], missing: false, draft: null, savedAt: '' };
+        const todayYmd = () => { const d = new Date(); return ymd(d.getFullYear(), d.getMonth(), d.getDate()); };
+        function toggleDailyReportSection() {
+            dailyReport.collapsed = !dailyReport.collapsed;
+            document.getElementById('dailyReportBody').classList.toggle('hidden', dailyReport.collapsed);
+            document.getElementById('dailyReportChevron').style.transform = dailyReport.collapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
+        }
+        function setDailyReportDate(v) { if (v) { dailyReport.date = v; renderDailyReport(appData.currentProjectId); } }
+        function changeDailyReportDate(delta) {
+            const d = new Date((dailyReport.date || todayYmd()) + 'T12:00:00');
+            d.setDate(d.getDate() + delta);
+            setDailyReportDate(ymd(d.getFullYear(), d.getMonth(), d.getDate()));
+        }
+        function setDailyReportAuthor(id) { dailyReport.author = id; renderDailyReport(appData.currentProjectId); }
+        const dailyReportCanSeeOthers = () => ['manager', 'lead'].includes(currentUserRole);
+        // Люди по бригадам из табеля за день: явка (есть часы) — человек на объекте.
+        async function dailyReportCrewsFromTimesheet(projectId, date) {
+            const { data } = await sb.from('timesheet_entries').select('*').eq('project_id', projectId).eq('work_date', date);
+            const mine = myBrigade(), count = new Map();
+            (data || []).filter(e => e.status !== 'absent' && Number(e.hours) > 0).forEach(e => {
+                const w = appData.workers.find(x => x.id === e.worker_id);
+                const b = (w && w.groupName) || 'Без бригады';
+                if (mine && !sameBrigade(b, mine)) return;
+                count.set(b, (count.get(b) || 0) + 1);
+            });
+            return [...count].map(([brigade, people]) => ({ brigade, people })).sort((a, b) => a.brigade.localeCompare(b.brigade, 'ru'));
+        }
+        async function renderDailyReport(projectId) {
+            const body = document.getElementById('dailyReportBody');
+            if (!projectId || !body) return;
+            const st = dailyReport;
+            if (!st.date) st.date = todayYmd();
+            document.getElementById('dailyReportDate').value = st.date;
+            const myId = currentUserProfile?.id || null;
+            const { data, error } = await sb.from('daily_reports').select('*').eq('project_id', projectId).eq('report_date', st.date);
+            if (appData.currentProjectId !== projectId) return;
+            st.missing = !!error;
+            if (error) {
+                body.innerHTML = `<div class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">Отчёты пока не сохраняются: в базе нет таблицы для них. Её нужно один раз создать файлом supabase/daily_reports.sql.</div>`;
+                return;
+            }
+            const reports = data || [];
+            st.others = reports.filter(r => r.author_id !== myId);
+            const viewingOther = dailyReportCanSeeOthers() && st.author && st.author !== myId;
+            st.report = viewingOther ? reports.find(r => r.author_id === st.author) || null : reports.find(r => r.author_id === myId) || null;
+            st.crews = viewingOther ? (st.report?.crews || []) : await dailyReportCrewsFromTimesheet(projectId, st.date);
+            if (appData.currentProjectId !== projectId) return;
+            st.draft = viewingOther ? null : {
+                machines: JSON.parse(JSON.stringify(st.report?.machines || [])),
+                notes: st.report?.notes || '',
+            };
+            dailyReportRender();
+        }
+        function dailyReportRender() {
+            const st = dailyReport, body = document.getElementById('dailyReportBody'), myId = currentUserProfile?.id || null;
+            const editable = !!st.draft;
+            const totalPeople = st.crews.reduce((s, c) => s + (Number(c.people) || 0), 0);
+            const picker = dailyReportCanSeeOthers() ? `<div class="flex items-center gap-2 mb-3 flex-wrap">
+                    <label for="dailyReportAuthor" class="text-sm font-semibold text-slate-600"><i class="fa-solid fa-user mr-1 text-slate-400"></i>Чей отчёт:</label>
+                    <select id="dailyReportAuthor" onchange="setDailyReportAuthor(this.value)" class="bg-white border border-slate-300 rounded-lg text-sm px-3 py-1.5 max-w-full">
+                        <option value="">Мой отчёт</option>
+                        ${st.others.map(r => `<option value="${escapeHtml(r.author_id)}" ${st.author === r.author_id ? 'selected' : ''}>${escapeHtml(r.author_name || 'Без имени')}</option>`).join('')}
+                    </select>
+                    <span class="text-xs text-slate-400">${st.others.length ? `Отчётов других за этот день: ${st.others.length}` : 'Других отчётов за этот день нет'}</span>
+                </div>` : '';
+            if (!editable && !st.report) { body.innerHTML = picker + '<div class="text-sm text-slate-400">Отчёта нет.</div>'; return; }
+            const machines = editable ? st.draft.machines : (st.report.machines || []);
+            const inp = 'border border-slate-300 rounded-lg px-2 py-1.5 text-sm';
+            body.innerHTML = `${picker}
+                ${!editable ? `<div class="text-xs text-slate-500 mb-2">Отчёт: <b>${escapeHtml(st.report.author_name || '')}</b>. Изменить его может только автор.</div>` : ''}
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="min-w-0">
+                        <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Люди по бригадам${editable ? ' <span class="normal-case font-normal">(из табеля)</span>' : ''}</h4>
+                        ${st.crews.length ? `<table id="dailyReportCrews" class="w-full text-sm"><tbody class="divide-y divide-slate-100">
+                            ${st.crews.map(c => `<tr><td class="py-1.5 text-slate-800">${escapeHtml(c.brigade)}</td><td class="py-1.5 text-right font-semibold">${c.people} чел.</td></tr>`).join('')}
+                            <tr class="border-t-2 border-slate-200"><td class="py-1.5 font-bold">Всего</td><td data-daily-total class="py-1.5 text-right font-bold">${totalPeople} чел.</td></tr>
+                        </tbody></table>` : `<div class="text-sm text-slate-400">В табеле за этот день никто не отмечен.</div>`}
+                    </div>
+                    <div class="min-w-0">
+                        <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Техника</h4>
+                        <div id="dailyReportMachines" class="space-y-2">
+                            ${machines.map((m, i) => editable ? `<div class="flex gap-2 items-center" data-machine="${i}">
+                                <input value="${escapeHtml(m.name || '')}" placeholder="Название" oninput="dailyReportSetMachine(${i}, 'name', this.value)" class="${inp} flex-1 min-w-0">
+                                <input type="number" min="0" value="${m.count ?? ''}" placeholder="шт" title="Количество" oninput="dailyReportSetMachine(${i}, 'count', this.value)" class="${inp} w-16">
+                                <input type="number" min="0" step="0.5" value="${m.hours ?? ''}" placeholder="ч" title="Часов" oninput="dailyReportSetMachine(${i}, 'hours', this.value)" class="${inp} w-16">
+                                <button onclick="dailyReportRemoveMachine(${i})" title="Убрать" class="w-8 h-8 flex-shrink-0 text-slate-400 hover:text-rose-600"><i class="fa-solid fa-xmark"></i></button>
+                            </div>` : `<div class="text-sm text-slate-800">${escapeHtml(m.name || '')} — ${m.count || 0} шт${m.hours ? `, ${m.hours} ч` : ''}</div>`).join('')}
+                            ${!machines.length && !editable ? '<div class="text-sm text-slate-400">Техники не было.</div>' : ''}
+                        </div>
+                        ${editable ? `<button id="dailyReportAddMachine" onclick="dailyReportAddMachine()" class="mt-2 text-sm font-semibold text-brand-700 hover:text-brand-600"><i class="fa-solid fa-plus mr-1"></i>Добавить технику</button>` : ''}
+                    </div>
+                </div>
+                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide mt-4 mb-2">Заметки</h4>
+                ${editable ? `<textarea id="dailyReportNotes" rows="3" oninput="dailyReport.draft.notes = this.value" placeholder="Что сделали, что мешало, что нужно на завтра" class="w-full ${inp}">${escapeHtml(st.draft.notes)}</textarea>`
+                    : `<div class="text-sm text-slate-800 whitespace-pre-wrap">${escapeHtml(st.report.notes || '—')}</div>`}
+                ${editable ? `<div class="flex items-center gap-3 mt-3 flex-wrap">
+                    <button id="dailyReportSave" onclick="saveDailyReport()" class="bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold px-4 py-2 rounded-lg"><i class="fa-solid fa-floppy-disk mr-1"></i>Сохранить отчёт</button>
+                    <span id="dailyReportStatus" class="text-xs text-slate-500">${st.report ? `Сохранён ${new Date(st.report.updated_at || st.report.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : 'Ещё не сохранён'}</span>
+                </div>` : ''}`;
+        }
+        function dailyReportSetMachine(i, field, v) {
+            const m = dailyReport.draft.machines[i];
+            if (m) m[field] = field === 'name' ? v : (v === '' ? null : Number(v));
+        }
+        function dailyReportAddMachine() { dailyReport.draft.machines.push({ name: '', count: 1, hours: null }); dailyReportRender(); document.querySelector('#dailyReportMachines [data-machine]:last-child input')?.focus(); }
+        function dailyReportRemoveMachine(i) { dailyReport.draft.machines.splice(i, 1); dailyReportRender(); }
+        async function saveDailyReport() {
+            const st = dailyReport, projectId = appData.currentProjectId;
+            if (!st.draft || !projectId) return;
+            const status = document.getElementById('dailyReportStatus');
+            status.textContent = 'Сохраняю…';
+            const row = {
+                project_id: projectId, author_id: currentUserProfile?.id, report_date: st.date,
+                author_name: currentUserProfile?.full_name || currentUserProfile?.email || '',
+                crews: st.crews, machines: st.draft.machines.filter(m => (m.name || '').trim()).map(m => ({ name: m.name.trim(), count: m.count ?? 1, hours: m.hours ?? null })),
+                notes: st.draft.notes.trim() || null, updated_at: new Date().toISOString(),
+            };
+            const { data, error } = await sb.from('daily_reports').upsert(row, { onConflict: 'project_id,author_id,report_date' }).select().single();
+            if (error) { status.textContent = 'Не удалось сохранить: ' + error.message; status.className = 'text-xs text-rose-600'; return; }
+            st.report = data || row;
+            st.draft.machines = JSON.parse(JSON.stringify(row.machines));
+            dailyReportRender();
         }
 
         function changeTimesheetMonth(delta) {

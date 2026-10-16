@@ -874,6 +874,81 @@ function seedScheduleItem(page, settings) {
     }, settings);
 }
 
+// ---- Ежедневный отчёт ----
+async function openDailyReport(page, profile, role, setup) {
+    await page.evaluate(async ({ profile, role, setup }) => {
+        currentUserProfile = profile; currentUserRole = role;
+        __db.workers = [{ id: 'w1', name: 'Иванов', group_name: 'Данияр' }, { id: 'w2', name: 'Петров', group_name: 'Руслан' }, { id: 'w3', name: 'Сидоров', group_name: 'Данияр' }, { id: 'w4', name: 'Козлов', group_name: 'Данияр' }];
+        __db.timesheet_entries = [
+            { id: 'e1', project_id: 'p1', worker_id: 'w1', work_date: '2026-10-16', status: 'full', hours: 8 },
+            { id: 'e2', project_id: 'p1', worker_id: 'w2', work_date: '2026-10-16', status: 'full', hours: 8 },
+            { id: 'e3', project_id: 'p1', worker_id: 'w3', work_date: '2026-10-16', status: 'full', hours: 8 },
+            { id: 'e4', project_id: 'p1', worker_id: 'w4', work_date: '2026-10-16', status: 'absent', hours: 0 },
+            { id: 'e5', project_id: 'p1', worker_id: 'w2', work_date: '2026-10-15', status: 'full', hours: 8 }];
+        if (setup) new Function(setup)();
+        appData.workers = __db.workers.map(w => ({ id: w.id, name: w.name, groupName: w.group_name }));
+        appData.currentProjectId = 'p1';
+        applyRoleUI(role);
+        ['boardsScreen', 'volumesScreen', 'scheduleScreen'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
+        document.getElementById('projectView').classList.remove('hidden');
+        dailyReport.date = '2026-10-16'; dailyReport.author = '';
+        await renderDailyReport('p1');
+    }, { profile, role, setup: setup || '' });
+}
+test('Ежедневный отчёт: люди по бригадам из табеля, техника, заметки; у каждого свой', async () => {
+    const page = await openApp();
+    await openDailyReport(page, { id: 'u5', full_name: 'Данияр', role: 'worker', brigade: null }, 'worker');
+    expect(await visible(page, '#dailyReportSection'), 'раздела «Ежедневный отчёт» не видно сотруднику');
+    let crews = await page.$eval('#dailyReportCrews', e => e.innerText.replace(/\s+/g, ' ').trim());
+    expect(/Данияр 2 чел\./.test(crews) && /Руслан 1 чел\./.test(crews) && /Всего 3 чел\./.test(crews), 'люди из табеля (неявка не считается): ' + crews);
+    await page.click('#dailyReportAddMachine');
+    await page.fill('#dailyReportMachines [data-machine="0"] input', 'Мини-погрузчик');
+    await page.fill('#dailyReportMachines [data-machine="0"] input[title="Часов"]', '6');
+    await page.fill('#dailyReportNotes', 'Уложили плитку у входа');
+    await page.click('#dailyReportSave');
+    await page.waitForFunction(() => __db.daily_reports?.length === 1);
+    const saved = await page.evaluate(() => __db.daily_reports[0]);
+    expect(saved.author_id === 'u5' && saved.report_date === '2026-10-16' && saved.notes === 'Уложили плитку у входа', 'отчёт сохранён неверно: ' + JSON.stringify(saved));
+    expect(JSON.stringify(saved.machines) === '[{"name":"Мини-погрузчик","count":1,"hours":6}]' && saved.crews.length === 2, 'техника или люди: ' + JSON.stringify(saved));
+    expect(/Сохранён/.test(await page.textContent('#dailyReportStatus')), 'нет отметки «Сохранён»');
+    // Повторное сохранение того же дня не создаёт второй отчёт.
+    await page.fill('#dailyReportNotes', 'Уложили плитку у входа, завтра бордюр');
+    await page.click('#dailyReportSave');
+    await page.waitForFunction(() => __db.daily_reports[0].notes.includes('бордюр'));
+    expect(await page.evaluate(() => __db.daily_reports.length) === 1, 'второй отчёт за тот же день');
+    // Другой день — чистая форма, люди за тот день.
+    await page.click('button[title="Предыдущий день"]');
+    await page.waitForFunction(() => document.getElementById('dailyReportDate').value === '2026-10-15');
+    await page.waitForFunction(() => /Всего 1 чел/.test(document.getElementById('dailyReportCrews')?.innerText.replace(/\s+/g, ' ') || ''));
+    expect(await page.$eval('#dailyReportNotes', e => e.value) === '', 'за другой день подставились чужие заметки');
+    // Сотрудник со своей бригадой видит в отчёте только её.
+    const p2 = await openApp({ width: 390, height: 800 });
+    await openDailyReport(p2, { id: 'u6', full_name: 'Руслан', role: 'worker', brigade: 'Руслан' }, 'worker');
+    await p2.click('#dailyReportAddMachine');
+    const fits = await p2.$eval('#dailyReportSection', e => [...e.querySelectorAll('*')].every(x => x.getBoundingClientRect().right <= e.getBoundingClientRect().right + 1));
+    expect(fits, 'на телефоне отчёт не помещается по ширине');
+    crews = await p2.$eval('#dailyReportCrews', e => e.innerText.replace(/\s+/g, ' ').trim());
+    expect(crews === 'Руслан 1 чел. Всего 1 чел.', 'бригадир видит чужие бригады: ' + crews);
+    expect(!(await p2.$('#dailyReportAuthor')), 'сотрудник может открывать чужие отчёты');
+    // Руководитель: свой отчёт пустой, но может открыть отчёт Данияра (только просмотр).
+    const p3 = await openApp();
+    await openDailyReport(p3, { id: 'u1', full_name: 'Грег', role: 'manager' }, 'manager',
+        "__db.daily_reports = [{ id: 'r1', project_id: 'p1', author_id: 'u5', author_name: 'Данияр', report_date: '2026-10-16', crews: [{ brigade: 'Данияр', people: 2 }], machines: [{ name: 'Каток', count: 1, hours: 4 }], notes: 'Укатали щебень' }];");
+    expect(await p3.$eval('#dailyReportNotes', e => e.value) === '', 'у руководителя не свой отчёт');
+    await p3.selectOption('#dailyReportAuthor', 'u5');
+    await p3.waitForFunction(() => /Укатали щебень/.test(document.getElementById('dailyReportBody').innerText));
+    const other = await p3.$eval('#dailyReportBody', e => e.innerText);
+    expect(/Каток — 1 шт, 4 ч/.test(other) && /Данияр 2 чел/.test(other.replace(/\s+/g, ' ')) && !(await p3.$('#dailyReportSave')), 'чужой отчёт: ' + other);
+    expect(!page.errors.length && !p2.errors.length && !p3.errors.length, 'ошибки на странице: ' + [...page.errors, ...p2.errors, ...p3.errors].join('; '));
+});
+
+test('Ежедневный отчёт: без таблицы в базе — понятная подсказка, а не ошибка', async () => {
+    const page = await openApp();
+    await openDailyReport(page, { id: 'u1', full_name: 'Грег', role: 'manager' }, 'manager', "__missingTables.push('daily_reports');");
+    expect(/supabase\/daily_reports\.sql/.test(await page.textContent('#dailyReportBody')), 'нет подсказки про таблицу');
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
 test('Задачи: счётчики сверху сходятся с разделами (галочка = выполнено)', async () => {
     const page = await openApp();
     const r = await page.evaluate(() => {

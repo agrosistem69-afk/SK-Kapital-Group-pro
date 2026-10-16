@@ -5,13 +5,16 @@
     window.__files = {};
     window.__rpc = { can_manage_drawings: false };
     const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(16).slice(2));
-    const keysOf = { material_aliases: ['project_id', 'alias'], plan_zones: ['project_id', 'sheet'], schedule_settings: ['project_id'] };
+    const keysOf = { material_aliases: ['project_id', 'alias'], plan_zones: ['project_id', 'sheet'], schedule_settings: ['project_id'], daily_reports: ['project_id', 'author_id', 'report_date'] };
+    // Таблицы, которых «нет в базе» (проверка подсказки «выполните SQL»).
+    window.__missingTables = [];
 
     function query(table) {
         const st = { filters: [], op: 'select', payload: null, opts: {} };
         const cmp = { in: (a, v) => v.includes(a), neq: (a, v) => a !== v, gte: (a, v) => a >= v, lte: (a, v) => a <= v, gt: (a, v) => a > v, lt: (a, v) => a < v };
         const match = r => st.filters.every(([c, v, op]) => op ? cmp[op](r[c], v) : r[c] === v);
         const run = () => {
+            if (window.__missingTables.includes(table)) return { data: null, error: { code: 'PGRST205', message: `Could not find the table 'public.${table}' in the schema cache` } };
             const db = window.__db;
             db[table] = db[table] || [];
             const rows = db[table];
@@ -35,9 +38,10 @@
                 const keys = keysOf[table] || ['id'];
                 list(st.payload).forEach(p => {
                     const e = rows.find(r => keys.every(k => r[k] === p[k]));
-                    if (e) Object.assign(e, p); else rows.push({ id: uuid(), ...p });
+                    if (e) Object.assign(e, p); else rows.push({ id: uuid(), created_at: new Date().toISOString(), ...p });
                 });
-                return { data: null, error: null };
+                const saved = list(st.payload).map(p => ({ ...rows.find(r => keys.every(k => r[k] === p[k])) }));
+                return { data: st.single ? saved[0] : saved, error: null };
             }
             let data = rows.filter(match).map(r => ({ ...r }));
             if (st.single) return { data: data[0] || null, error: null };
