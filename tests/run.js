@@ -1312,6 +1312,23 @@ test('Без VPN база недоступна — запросы идут че�
     expect(await page.evaluate(() => localStorage.getItem('skkg-db-route') === null), 'отметка обхода не снялась');
 });
 
+test('Через skkg.ru изменения других людей подтягиваются сами раз в минуту', async () => {
+    const page = await openApp();
+    const calls = await page.evaluate(async () => {
+        sbRoute.proxy = true;
+        const realInterval = window.setInterval; let tick = null;
+        window.setInterval = (fn, ms) => { if (ms === 60000) tick = fn; return 0; };
+        let n = 0; window.refreshAllData = async () => { n++; };
+        let channels = 0; const ch = sb.channel; sb.channel = (...a) => { channels++; return ch.apply(sb, a); };
+        subscribeRealtime();
+        window.setInterval = realInterval;
+        if (tick) tick();
+        return { n, channels, hasTick: !!tick };
+    });
+    expect(calls.hasTick && calls.n === 1, 'обновление раз в минуту не настроено');
+    expect(calls.channels === 0, 'через skkg.ru не нужно подключать мгновенные обновления');
+});
+
 test('Нет связи с базой — кнопка «Войти» показывает понятную ошибку, а не молчит', async () => {
     const context = await browser.newContext();
     const page = await context.newPage();
