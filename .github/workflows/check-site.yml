@@ -27,3 +27,15 @@ jobs:
           curl -sSI "https://skkg.ru/" | grep -iE '^(HTTP|cache-control|expires|location|server)' || true
           curl -sS "https://skkg.ru/" | grep -c 'showScheduleScreen' || true
           exit $fail
+      - name: Проверить обход блокировки базы (sb.php)
+        if: always()
+        run: |
+          KEY=$(grep -o "sb_publishable_[A-Za-z0-9_-]*" index.html | head -1)
+          for u in "/auth/v1/health" "/rest/v1/signup_projects?select=*"; do
+            echo "=== sb.php?u=$u"
+            curl -sS -D - "https://skkg.ru/sb.php?u=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$u")" -H "apikey: $KEY" -o body || true
+            head -c 800 body; echo
+          done
+          echo "=== sb.php без параметров (ожидается 400 bad path)"
+          curl -sS -D - "https://skkg.ru/sb.php" -o body || true
+          head -c 800 body; echo
