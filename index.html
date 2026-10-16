@@ -112,6 +112,25 @@
         @keyframes splashFade { to { opacity: .85; } }
         @keyframes splashOut { to { opacity: 0; visibility: hidden; } }
         .sp-static { font-size: 34px; font-weight: 300; letter-spacing: .55em; padding-left: .55em; text-shadow: 0 0 18px rgba(125,211,252,.55); }
+        /* Окна входа, регистрации и нового пароля — в стиле заставки */
+        .auth-glow { background: radial-gradient(120% 80% at 50% 35%, #12305a 0%, #0b1730 55%, #050b18 100%); color: #e6f1ff; }
+        .auth-glow .sp-static { color: #e6f1ff; }
+        .auth-line { width: 180px; height: 1px; margin: 16px auto 12px; background: linear-gradient(90deg, transparent, #7dd3fc, transparent); box-shadow: 0 0 10px #38bdf8; }
+        .auth-sub { font-size: 11px; letter-spacing: .3em; text-transform: uppercase; color: #93c5fd; opacity: .85; }
+        .auth-card { background: rgba(14, 35, 70, .55); border: 1px solid rgba(125, 211, 252, .22); box-shadow: 0 0 40px rgba(56, 189, 248, .12), inset 0 1px 0 rgba(255,255,255,.06); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+        .auth-glow h2 { color: #e0f2fe !important; letter-spacing: .04em; }
+        .auth-glow input, .auth-glow select { background: rgba(5, 14, 32, .65) !important; border-color: rgba(125, 211, 252, .28) !important; color: #e6f1ff !important; border-radius: .75rem !important; }
+        .auth-glow input::placeholder { color: rgba(186, 230, 253, .45); }
+        .auth-glow input:focus, .auth-glow select:focus { border-color: #7dd3fc !important; box-shadow: 0 0 0 1px #7dd3fc, 0 0 16px rgba(56, 189, 248, .35) !important; --tw-ring-shadow: 0 0 #0000 !important; }
+        .auth-glow input:-webkit-autofill { -webkit-text-fill-color: #e6f1ff; -webkit-box-shadow: 0 0 0 40px #0a1a36 inset; caret-color: #e6f1ff; }
+        .auth-glow select option { background: #0b1730; color: #e6f1ff; }
+        .auth-glow label, .auth-glow .text-slate-500, .auth-glow .text-slate-400, .auth-glow .text-slate-600 { color: rgba(186, 230, 253, .65) !important; }
+        .auth-glow .text-brand-700 { color: #7dd3fc !important; }
+        .auth-glow button[type=submit] { background: linear-gradient(180deg, #0ea5e9, #0369a1) !important; border-radius: .75rem !important; box-shadow: 0 0 18px rgba(14, 165, 233, .4); letter-spacing: .03em; }
+        .auth-glow button[type=submit]:hover { box-shadow: 0 0 26px rgba(56, 189, 248, .6); }
+        .auth-glow .text-rose-600 { color: #fda4af !important; }
+        .auth-glow .text-emerald-600 { color: #6ee7b7 !important; }
+        .auth-glow #authError button { background: rgba(255,255,255,.08) !important; color: #e0f2fe !important; }
         #bioLock { background: radial-gradient(120% 80% at 50% 35%, #12305a 0%, #0b1730 55%, #050b18 100%); }
         .bio-word { font-size: 26px; font-weight: 300; letter-spacing: .55em; padding-left: .55em; text-shadow: 0 0 16px rgba(125,211,252,.5); }
         .bio-pad { position: relative; width: 112px; height: 112px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 34px auto 26px;
@@ -147,21 +166,15 @@
     </div>
 
     <!-- =========================== LOGIN SCREEN =========================== -->
-    <div id="loginScreen" class="hidden fixed inset-0 bg-slate-900 z-[100] flex items-center justify-center p-4">
+    <div id="loginScreen" class="hidden fixed inset-0 auth-glow z-[100] flex items-center justify-center p-4">
         <div class="w-full max-w-sm">
             <div class="text-center mb-8">
-                <div class="bg-brand-500 text-white w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg">
-                    <svg viewBox="0 0 24 24" class="w-8 h-8" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M4.5 12.5L9.3 17.3L15 10.6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-                        <path d="M14.2 10.3C14.2 10.3 15.4 6.4 19.7 5.6C19.7 5.6 19.6 9.8 15.8 11.3C15.8 11.3 14.8 11.5 14.2 10.3Z" fill="currentColor"/>
-                        <path d="M15.5 10.5C16.6 9.2 18 7.4 19.6 5.8" stroke="currentColor" stroke-width="0.9" stroke-linecap="round"/>
-                    </svg>
-                </div>
-                <h1 class="text-white font-bold text-xl">SKKG Pro</h1>
-                <p class="text-slate-400 text-sm mt-1">Учёт работ и контроль исполнителей</p>
+                <div class="sp-static">SKKG</div>
+                <div class="auth-line"></div>
+                <p class="auth-sub">Учёт работ и контроль исполнителей</p>
             </div>
 
-            <div class="bg-white rounded-xl shadow-xl p-6">
+            <div class="auth-card rounded-2xl p-6">
                 <!-- Login form -->
                 <form id="loginFormEl" onsubmit="handleLogin(event)" class="space-y-3">
                     <h2 class="font-bold text-slate-800 text-sm mb-2">Вход в систему</h2>
@@ -221,21 +234,15 @@
     </div>
 
     <!-- =========================== NEW PASSWORD SCREEN (после перехода по ссылке из письма восстановления) =========================== -->
-    <div id="newPasswordScreen" class="hidden fixed inset-0 bg-slate-900 z-[100] flex items-center justify-center p-4">
+    <div id="newPasswordScreen" class="hidden fixed inset-0 auth-glow z-[100] flex items-center justify-center p-4">
         <div class="w-full max-w-sm">
             <div class="text-center mb-8">
-                <div class="bg-brand-500 text-white w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg">
-                    <svg viewBox="0 0 24 24" class="w-8 h-8" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M4.5 12.5L9.3 17.3L15 10.6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-                        <path d="M14.2 10.3C14.2 10.3 15.4 6.4 19.7 5.6C19.7 5.6 19.6 9.8 15.8 11.3C15.8 11.3 14.8 11.5 14.2 10.3Z" fill="currentColor"/>
-                        <path d="M15.5 10.5C16.6 9.2 18 7.4 19.6 5.8" stroke="currentColor" stroke-width="0.9" stroke-linecap="round"/>
-                    </svg>
-                </div>
-                <h1 class="text-white font-bold text-xl">SKKG Pro</h1>
-                <p class="text-slate-400 text-sm mt-1">Новый пароль</p>
+                <div class="sp-static">SKKG</div>
+                <div class="auth-line"></div>
+                <p class="auth-sub">Новый пароль</p>
             </div>
 
-            <div class="bg-white rounded-xl shadow-xl p-6">
+            <div class="auth-card rounded-2xl p-6">
                 <form id="newPasswordFormEl" onsubmit="handleSetNewPassword(event)" class="space-y-3">
                     <h2 class="font-bold text-slate-800 text-sm mb-2">Придумайте новый пароль</h2>
                     <div class="relative">

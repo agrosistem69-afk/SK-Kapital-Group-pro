@@ -949,6 +949,24 @@ test('Заставка: буквы SKKG проявляются, нажатиям
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
+test('Окно входа в стиле заставки: тёмный фон, буквы SKKG, тёмные поля, всё помещается на телефоне', async () => {
+    const page = await openApp({ width: 390, height: 780 });
+    await page.evaluate(() => { document.getElementById('appRoot').classList.add('hidden'); document.getElementById('loginScreen').classList.remove('hidden'); });
+    expect(await page.$eval('#loginScreen', el => el.classList.contains('auth-glow') && /radial-gradient/.test(getComputedStyle(el).backgroundImage)), 'у окна входа нет фона как у заставки');
+    expect(await page.$eval('#loginScreen .sp-static', el => el.textContent) === 'SKKG', 'в окне входа нет букв SKKG');
+    const bg = await page.$eval('#loginEmail', el => getComputedStyle(el).backgroundColor);
+    expect(/rgba\(5, 14, 32/.test(bg), 'поле почты не тёмное: ' + bg);
+    await page.fill('#loginEmail', 'a@b.ru');
+    expect(await page.$eval('#loginEmail', el => getComputedStyle(el).color) === 'rgb(230, 241, 255)', 'текст в поле почты не светлый');
+    for (const sel of ['#loginFormEl', '#signupFormEl']) {
+        if (sel === '#signupFormEl') await page.evaluate(() => toggleAuthMode());
+        const box = await page.$eval(sel, el => { const r = el.getBoundingClientRect(); return { l: r.left, r: r.right }; });
+        expect(box.l >= 0 && box.r <= 390, sel + ' вылезает за край экрана');
+    }
+    expect(await page.$eval('#newPasswordScreen', el => el.classList.contains('auth-glow')), 'окно нового пароля не в стиле заставки');
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
 // ---- Ежедневный отчёт ----
 async function openDailyReport(page, profile, role, setup) {
     await page.evaluate(async ({ profile, role, setup }) => {
