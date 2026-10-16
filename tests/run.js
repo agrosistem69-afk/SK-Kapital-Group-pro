@@ -905,8 +905,11 @@ test('Вход по отпечатку: включается в «Аккаунт
     expect(creds.length === 1, 'отпечаток не зарегистрирован');
     // Открываю приложение заново: сразу замок, отпечаток проходит — замок исчезает.
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => window.__bioSeen = window.__bioSeen || !document.getElementById('bioLock').classList.contains('hidden'), null, { timeout: 5000 }).catch(() => {});
-    await page.waitForFunction(() => document.getElementById('bioLock').classList.contains('hidden'), null, { timeout: 5000 });
+    // Заставка с буквами показывается и при входе по отпечатку: она поверх замка и не пропускает нажатия.
+    await page.waitForFunction(() => document.getElementById('splash') && !document.getElementById('bioLock').classList.contains('hidden'), null, { timeout: 5000 });
+    expect(await page.$eval('#splash', el => +getComputedStyle(el).zIndex > 2147483000 && getComputedStyle(el).pointerEvents === 'auto'), 'заставка не поверх замка отпечатка');
+    expect(await page.$eval('#splash', el => +getComputedStyle(el).opacity) === 1, 'заставка пропала при входе по отпечатку');
+    await page.waitForFunction(() => document.getElementById('bioLock').classList.contains('hidden'), null, { timeout: 10000 });
     // Отпечаток не подтверждён — замок остаётся, приложение закрыто.
     await cdp.send('WebAuthn.setUserVerified', { authenticatorId, isUserVerified: false });
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -985,6 +988,7 @@ test('Звук: мелодия при заставке и при входе, в�
     await page.evaluate(() => { window.__uiSoundLog = []; return uiSound('unlock'); });
     expect(!(await page.evaluate(() => window.__uiSoundLog.length)), 'звук играет, хотя выключен');
     // Описание приложения сервис-воркер не берёт из памяти, иначе телефон видит старое имя и значок.
+    expect(/rel="manifest" href="manifest\.json\?v=\d+"/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'index.html'), 'utf8')), 'у manifest.json нет ?v= — телефон может взять старый из памяти браузера');
     expect(!/'manifest\.json',/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'service-worker.js'), 'utf8')), 'manifest.json сохраняется в памяти телефона');
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });

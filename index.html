@@ -17,10 +17,10 @@
     </script>
 
     <!-- PWA -->
-    <link rel="manifest" href="manifest.json">
-    <link rel="icon" type="image/png" href="favicon.png?v=50">
+    <link rel="manifest" href="manifest.json?v=51">
+    <link rel="icon" type="image/png" href="favicon.png?v=51">
     <meta name="theme-color" content="#0b1730">
-    <link rel="apple-touch-icon" href="icons/icon-192.png?v=50">
+    <link rel="apple-touch-icon" href="icons/icon-192.png?v=51">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="SKKG Pro">
@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '50';
+        window.APP_VERSION = '51';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=50">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=50">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=50">
+    <link rel="stylesheet" href="vendor/app.css?v=51">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=51">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=51">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=50" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=50" defer></script>
-    <script src="vendor/jszip.min.js?v=50" defer></script>
+    <script src="vendor/html2canvas.min.js?v=51" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=51" defer></script>
+    <script src="vendor/jszip.min.js?v=51" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=50"></script>
+    <script src="vendor/supabase.js?v=51"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -2494,7 +2494,17 @@
         }
         if (document.getElementById('splash')) uiSound('intro');
 
-        if (bioSaved()) { bioShowLock(); bioUnlock(); }
+        // С отпечатком заставка всё равно показывается: замок открывается под ней (приложение уже закрыто),
+        // заставка в это время не пропускает нажатия, а палец телефон просит, когда заставка уходит.
+        const splashEl = document.getElementById('splash');
+        if (bioSaved()) {
+            bioShowLock();
+            if (splashEl) {
+                splashEl.style.zIndex = '2147483600';
+                splashEl.style.pointerEvents = 'auto';
+                setTimeout(bioUnlock, 4000);
+            } else bioUnlock();
+        }
         // Заставка исчезает сама (CSS); после этого убираем её со страницы совсем.
         setTimeout(() => { const sp = document.getElementById('splash'); if (sp) sp.remove(); }, 5000);
         document.addEventListener('visibilitychange', () => {
