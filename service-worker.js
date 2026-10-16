@@ -9,7 +9,7 @@
 // При каждой публикации меняйте версию: CACHE_NAME здесь, APP_VERSION и ?v= в index.html,
 // version.json. Автотест проверяет, что они совпадают.
 
-const VERSION = '44';
+const VERSION = '45';
 const CACHE_NAME = 'workcontrol-cache-v' + VERSION;
 const CORE = [
     'vendor/app.css',

@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '44';
+        window.APP_VERSION = '45';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=44">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=44">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=44">
+    <link rel="stylesheet" href="vendor/app.css?v=45">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=45">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=45">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=44" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=44" defer></script>
-    <script src="vendor/jszip.min.js?v=44" defer></script>
+    <script src="vendor/html2canvas.min.js?v=45" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=45" defer></script>
+    <script src="vendor/jszip.min.js?v=45" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=44"></script>
+    <script src="vendor/supabase.js?v=45"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -9035,11 +9035,15 @@
                 ${st.error ? `<div class="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mb-2">${escapeHtml(st.error)}</div>` : ''}
                 <div class="space-y-2 mb-3">${sets.map(n => {
                     const ms = notesSetMarks(n), open = ms.filter(m => !m.resolved).length;
-                    const who = [...new Set(ms.map(m => m.author_name).filter(Boolean))].join(', ');
+                    // Составитель — автор первой пометки, дата — когда она нарисована (у нового пустого — я и сегодня).
+                    const first = ms[0], author = first ? (first.author_name || 'Без имени') : (currentUserProfile?.full_name || currentUserProfile?.email || '');
+                    const made = new Date(first?.created_at || Date.now()).toLocaleDateString('ru-RU');
+                    const others = [...new Set(ms.map(m => m.author_name).filter(a => a && a !== author))].join(', ');
                     return `<div data-notes-set="${escapeHtml(n)}" class="flex items-stretch border border-slate-200 rounded-xl hover:border-brand-400 bg-white">
                         <button onclick="notesOpenSet(this.closest('[data-notes-set]').dataset.notesSet)" class="flex-1 min-w-0 text-left px-3 py-2.5">
                             <span class="block font-semibold text-slate-800 truncate">${escapeHtml(n)}</span>
-                            <span class="block text-xs text-slate-500 truncate">${ms.length ? `Пометок: ${ms.length}, открытых: ${open}${who ? ' · ' + escapeHtml(who) : ''}` : 'Пока пусто'}</span>
+                            <span data-notes-set-meta class="block text-xs text-slate-600 truncate">Составил: ${escapeHtml(author)} · от ${made}</span>
+                            <span class="block text-xs text-slate-400 truncate">${ms.length ? `Пометок: ${ms.length}, открытых: ${open}${others ? ' · дополнили: ' + escapeHtml(others) : ''}` : 'Пока пусто'}</span>
                         </button>
                         ${notesCanRenameSet(n) ? `<button data-notes-rename onclick="notesRenameSet(this.closest('[data-notes-set]').dataset.notesSet)" title="Переименовать" class="w-11 flex-shrink-0 text-slate-500 hover:text-brand-700 border-l border-slate-200"><i class="fa-solid fa-pen"></i></button>` : ''}
                     </div>`; }).join('')}</div>

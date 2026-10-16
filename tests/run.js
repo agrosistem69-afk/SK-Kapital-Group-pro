@@ -640,6 +640,9 @@ test('Замечания: сначала список замечаний лис�
     let names = await page.$$eval('#notesSets [data-notes-set]', els => els.map(e => e.dataset.notesSet));
     expect(JSON.stringify(names) === '["Замечание 1","Бордюры"]', 'замечания в списке: ' + JSON.stringify(names));
     expect(/Пометок: 1, открытых: 0/.test(await page.$eval('#notesSets [data-notes-set="Бордюры"]', e => e.innerText)), 'нет счётчика пометок');
+    // Под замечанием — кто составил и от какого числа (по первой пометке).
+    const meta = await page.$eval('#notesSets [data-notes-set="Бордюры"] [data-notes-set-meta]', e => e.textContent.trim());
+    expect(meta === 'Составил: Прораб · от 14.10.2026', 'составитель и дата: ' + meta);
     // Чужое замечание переименовать нельзя (не ответственный за чертежи), своё — можно.
     expect(!(await page.$('#notesSets [data-notes-set="Бордюры"] [data-notes-rename]')), 'чужое замечание можно переименовать');
     page.once('dialog', d => d.accept('Плитка у входа'));
