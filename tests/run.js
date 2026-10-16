@@ -971,6 +971,24 @@ test('Окно входа в стиле заставки: тёмный фон, �
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
+test('Звук: мелодия при заставке и при входе, выключается в «Аккаунте»', async () => {
+    const page = await openApp({ width: 390, height: 844 });
+    expect((await page.evaluate(() => window.__uiSoundLog || [])).includes('intro'), 'при заставке не было звука');
+    await page.evaluate(() => { document.getElementById('appRoot').classList.add('hidden'); document.getElementById('loginScreen').classList.remove('hidden'); window.__uiSoundLog = []; sb.auth.signInWithPassword = async () => ({ error: null }); });
+    await page.fill('#loginEmail', 'a@b.ru'); await page.fill('#loginPassword', '123456');
+    await page.click('#loginFormEl button[type=submit]');
+    await page.waitForFunction(() => (window.__uiSoundLog || []).includes('unlock'), null, { timeout: 5000 });
+    await page.evaluate(() => { document.getElementById('loginScreen').classList.add('hidden'); currentUserProfile = { id: 'u1' }; openModal('accountModal'); return bioRenderOption(); });
+    expect(await page.isChecked('#soundToggle'), 'звук по умолчанию выключен');
+    await page.click('#soundToggle');
+    expect(await page.evaluate(() => localStorage.getItem('skkg-sound')) === 'off', 'выключение звука не запомнилось');
+    await page.evaluate(() => { window.__uiSoundLog = []; return uiSound('unlock'); });
+    expect(!(await page.evaluate(() => window.__uiSoundLog.length)), 'звук играет, хотя выключен');
+    // Описание приложения сервис-воркер не берёт из памяти, иначе телефон видит старое имя и значок.
+    expect(!/'manifest\.json',/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'service-worker.js'), 'utf8')), 'manifest.json сохраняется в памяти телефона');
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
 // ---- Ежедневный отчёт ----
 async function openDailyReport(page, profile, role, setup) {
     await page.evaluate(async ({ profile, role, setup }) => {

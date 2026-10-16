@@ -9,7 +9,7 @@
 // При каждой публикации меняйте версию: CACHE_NAME здесь, APP_VERSION и ?v= в index.html,
 // version.json. Автотест проверяет, что они совпадают.
 
-const VERSION = '49';
+const VERSION = '50';
 const CACHE_NAME = 'workcontrol-cache-v' + VERSION;
 const CORE = [
     'vendor/app.css',
@@ -22,9 +22,6 @@ const CORE = [
 ].map((u) => u + '?v=' + VERSION).concat([
     'vendor/fontawesome/webfonts/fa-solid-900.woff2',
     'vendor/fontawesome/webfonts/fa-regular-400.woff2',
-    'manifest.json',
-    'icons/icon-192.png',
-    'icons/icon-512.png',
 ]);
 
 // Свежая копия с сервера: метка в адресе обходит кэш хостинга, no-store — кэш браузера.
@@ -60,6 +57,9 @@ self.addEventListener('fetch', (event) => {
     if (url.pathname.endsWith('/version.json')) return;
     // Запросы к базе через наш сайт (обход блокировки) — всегда напрямую в сеть.
     if (url.pathname.endsWith('/sb.php')) return;
+    // Описание приложения (название, значок, цвет первого окна) — всегда с сайта, иначе телефон
+    // при установке получает старое из памяти.
+    if (url.pathname.endsWith('/manifest.json')) return;
 
     // Страница приложения: сначала сеть. Если связи нет или сервер долго молчит — сохранённая копия.
     if (request.mode === 'navigate' || request.destination === 'document') {

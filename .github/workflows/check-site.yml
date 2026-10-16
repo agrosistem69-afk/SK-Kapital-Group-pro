@@ -12,7 +12,7 @@ jobs:
       - name: Сравнить index.html и service-worker.js на сайте с репозиторием
         run: |
           fail=0
-          for f in index.html service-worker.js; do
+          for f in index.html service-worker.js manifest.json; do
             echo "=== $f: заголовки ответа (обычный запрос)"
             curl -sSI "https://skkg.ru/$f" | grep -iE '^(HTTP|cache-control|expires|last-modified|etag|age|x-cache|server)' || true
             curl -sS "https://skkg.ru/$f?nocache=$GITHUB_RUN_ID" -o live_nc
