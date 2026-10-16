@@ -17,10 +17,10 @@
     </script>
 
     <!-- PWA -->
-    <link rel="manifest" href="manifest.json?v=51">
-    <link rel="icon" type="image/png" href="favicon.png?v=51">
+    <link rel="manifest" href="manifest.json?v=52">
+    <link rel="icon" type="image/png" href="favicon.png?v=52">
     <meta name="theme-color" content="#0b1730">
-    <link rel="apple-touch-icon" href="icons/icon-192.png?v=51">
+    <link rel="apple-touch-icon" href="icons/icon-192.png?v=52">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="SKKG Pro">
@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '51';
+        window.APP_VERSION = '52';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=51">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=51">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=51">
+    <link rel="stylesheet" href="vendor/app.css?v=52">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=52">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=52">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=51" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=51" defer></script>
-    <script src="vendor/jszip.min.js?v=51" defer></script>
+    <script src="vendor/html2canvas.min.js?v=52" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=52" defer></script>
+    <script src="vendor/jszip.min.js?v=52" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=51"></script>
+    <script src="vendor/supabase.js?v=52"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -102,12 +102,24 @@
         /* Заставка при запуске и экран отпечатка (в духе тёмной заставки с подсвеченными буквами) */
         #splash { position: fixed; inset: 0; z-index: 2147482000; pointer-events: none; display: flex; flex-direction: column; align-items: center; justify-content: center;
                   background: radial-gradient(120% 80% at 50% 40%, #12305a 0%, #0b1730 55%, #050b18 100%); color: #e6f1ff;
-                  animation: splashOut .9s ease 3.9s forwards; }
-        #splash .sp-word { display: flex; gap: .55em; font-size: 34px; font-weight: 300; letter-spacing: .02em; }
+                  animation: splashOut .9s ease 5.3s forwards; }
+        #splash .sp-mark { position: relative; }
+        #splash .sp-word { display: flex; gap: .55em; font-size: 34px; font-weight: 300; letter-spacing: .02em; color: #9fc6ec; animation: splashGlow 1.6s ease 2s; }
+        /* Переливание «как бриллиант»: поверх букв проходит блик (тот же текст, залитый светлой полосой), вспыхивают искры */
+        #splash .sp-shine { position: absolute; inset: 0; display: block; white-space: nowrap; letter-spacing: .57em; color: transparent; text-shadow: none; pointer-events: none;
+                  background: linear-gradient(105deg, transparent 36%, #e0f7ff 44%, #ffffff 48%, #fdf4ff 50%, #ffffff 52%, #cffafe 56%, transparent 64%) no-repeat;
+                  background-size: 300% 100%; background-position: 110% 0; -webkit-background-clip: text; background-clip: text; animation: splashShine 1.8s ease-in-out 2.1s forwards; }
+        #splash .sp-spark { position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px; opacity: 0; transform: scale(0); animation: splashSpark .9s ease-out forwards; }
+        #splash .sp-spark::before, #splash .sp-spark::after { content: ''; position: absolute; left: 50%; top: 0; width: 2px; height: 100%; margin-left: -1px; border-radius: 2px;
+                  background: linear-gradient(transparent, #fff, transparent); box-shadow: 0 0 6px #a5f3fc; }
+        #splash .sp-spark::after { transform: rotate(90deg); }
         #splash .sp-word span { opacity: 0; filter: blur(8px); transform: translateY(6px); animation: splashLetter 1.1s cubic-bezier(.2,.7,.2,1) forwards; text-shadow: 0 0 18px rgba(125,211,252,.55); }
-        #splash .sp-line { width: 0; height: 1px; margin: 16px 0 12px; background: linear-gradient(90deg, transparent, #7dd3fc, transparent); box-shadow: 0 0 10px #38bdf8; animation: splashLine 1.3s ease 1.4s forwards; }
-        #splash .sp-sub { font-size: 11px; letter-spacing: .5em; text-transform: uppercase; color: #93c5fd; opacity: 0; animation: splashFade 1s ease 2s forwards; padding-left: .5em; }
+        #splash .sp-line { width: 0; height: 1px; margin: 16px 0 12px; background: linear-gradient(90deg, transparent, #7dd3fc, transparent); box-shadow: 0 0 10px #38bdf8; animation: splashLine 1.3s ease 3.2s forwards; }
+        #splash .sp-sub { font-size: 11px; letter-spacing: .5em; text-transform: uppercase; color: #93c5fd; opacity: 0; animation: splashFade 1s ease 3.7s forwards; padding-left: .5em; }
         @keyframes splashLetter { to { opacity: 1; filter: blur(0); transform: none; } }
+        @keyframes splashShine { from { background-position: 110% 0; } to { background-position: -10% 0; } }
+        @keyframes splashGlow { 50% { filter: drop-shadow(0 0 12px rgba(165,243,252,.9)); } }
+        @keyframes splashSpark { 0% { opacity: 0; transform: scale(0) rotate(0); } 40% { opacity: 1; transform: scale(1) rotate(45deg); } 100% { opacity: 0; transform: scale(.2) rotate(90deg); } }
         @keyframes splashLine { to { width: 180px; } }
         @keyframes splashFade { to { opacity: .85; } }
         @keyframes splashOut { to { opacity: 0; visibility: hidden; } }
@@ -149,10 +161,16 @@
 </head>
 <body class="bg-slate-100 text-slate-800 font-sans antialiased min-h-screen flex flex-col">
 
-    <!-- Заставка при запуске: буквы проявляются, под ними загорается линия, примерно через 4 секунды исчезает сама.
+    <!-- Заставка при запуске: буквы проявляются, переливаются бликом с искрами, под ними загорается линия, примерно через 6 секунд исчезает сама.
          Нажатиям не мешает (pointer-events: none), поэтому приложение под ней уже работает. -->
     <div id="splash" aria-hidden="true">
-        <div class="sp-word"><span style="animation-delay:.1s">S</span><span style="animation-delay:.4s">K</span><span style="animation-delay:.7s">K</span><span style="animation-delay:1s">G</span></div>
+        <div class="sp-mark">
+            <div class="sp-word"><span style="animation-delay:.1s">S</span><span style="animation-delay:.4s">K</span><span style="animation-delay:.7s">K</span><span style="animation-delay:1s">G</span></div>
+            <div class="sp-word sp-shine">SKKG</div>
+            <i class="sp-spark" style="left:4%;top:12%;animation-delay:2.3s"></i>
+            <i class="sp-spark" style="left:63%;top:2%;animation-delay:2.65s"></i>
+            <i class="sp-spark" style="left:98%;top:80%;animation-delay:3s"></i>
+        </div>
         <div class="sp-line"></div>
         <div class="sp-sub">СК Капитал Групп</div>
     </div>
@@ -2486,6 +2504,8 @@
                     n.connect(f).connect(g).connect(out); n.start(t0); n.stop(t0 + len);
                     [[220, 0.1], [329.63, 0.4], [440, 0.7], [554.37, 1.0]].forEach(([fq, at]) => tone(fq, at, 3.2 - at, 0.09));
                     tone(1318.5, 1.1, 1.6, 0.05); tone(1760, 1.4, 1.4, 0.03);
+                    // Искры при переливании букв.
+                    [[2637, 2.3], [3136, 2.65], [3520, 3.0]].forEach(([fq, at]) => tone(fq, at, 0.7, 0.025, 'triangle'));
                 } else {
                     // Вход: два светлых звонких тона.
                     tone(880, 0, 0.5, 0.16); tone(1318.5, 0.12, 0.8, 0.14); tone(1760, 0.12, 0.6, 0.04, 'triangle');
@@ -2502,11 +2522,11 @@
             if (splashEl) {
                 splashEl.style.zIndex = '2147483600';
                 splashEl.style.pointerEvents = 'auto';
-                setTimeout(bioUnlock, 4000);
+                setTimeout(bioUnlock, 5400);
             } else bioUnlock();
         }
         // Заставка исчезает сама (CSS); после этого убираем её со страницы совсем.
-        setTimeout(() => { const sp = document.getElementById('splash'); if (sp) sp.remove(); }, 5000);
+        setTimeout(() => { const sp = document.getElementById('splash'); if (sp) sp.remove(); }, 6500);
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'hidden') { bioHiddenAt = Date.now(); return; }
             if (bioSaved() && bioHiddenAt && Date.now() - bioHiddenAt > BIO_RELOCK_MS) { bioShowLock(); bioUnlock(); }

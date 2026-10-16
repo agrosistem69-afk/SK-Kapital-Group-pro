@@ -935,10 +935,14 @@ test('Вход по отпечатку: включается в «Аккаунт
 test('Заставка: буквы SKKG проявляются, нажатиям не мешает, держится около 4 секунд и исчезает; отпечаток дорисовывает кольцо', async () => {
     const page = await openApp({ width: 390, height: 844 });
     expect(await page.$('#splash'), 'заставки нет при запуске');
-    expect(await page.$eval('#splash .sp-word', el => el.textContent) === 'SKKG', 'в заставке нет букв SKKG');
+    expect(await page.$eval('#splash .sp-word:not(.sp-shine)', el => el.textContent) === 'SKKG', 'в заставке нет букв SKKG');
     expect(await page.$eval('#splash', el => getComputedStyle(el).pointerEvents) === 'none', 'заставка перехватывает нажатия');
     await page.waitForTimeout(2300);
     expect(await page.$eval('#splash .sp-word span:last-child', el => +getComputedStyle(el).opacity) > 0.9, 'буквы не проявились');
+    // Переливание: блик идёт по буквам, есть искры.
+    expect(await page.$eval('#splash .sp-shine', el => getComputedStyle(el).animationName === 'splashShine' && getComputedStyle(el).backgroundClip === 'text'), 'буквы не переливаются');
+    expect((await page.$$('#splash .sp-spark')).length >= 3, 'нет искр');
+    await page.waitForTimeout(1500);
     expect(await page.$eval('#splash', el => +getComputedStyle(el).opacity) === 1, 'заставка пропадает слишком рано — не успеть полюбоваться');
     await page.waitForFunction(() => !document.getElementById('splash'), null, { timeout: 5000 });
     // Успешный отпечаток: вокруг кнопки рисуется кольцо, потом замок гаснет.
@@ -971,6 +975,10 @@ test('Окно входа в стиле заставки: тёмный фон, �
     // Первое окно телефона при запуске (из manifest.json): новое имя и тёмный фон, как у заставки.
     const man = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, '..', 'manifest.json'), 'utf8'));
     expect(man.name === 'SKKG Pro' && man.short_name === 'SKKG Pro' && man.background_color === '#0b1730', 'в manifest.json старое имя или фон');
+    // Крупный значок для первого окна — прозрачный, чтобы до заставки не было никакой картинки.
+    const big = man.icons.find(i => i.purpose === 'any' && i.sizes === '512x512');
+    const png = require('fs').readFileSync(require('path').join(__dirname, '..', big.src.split('?')[0]));
+    expect(png[25] === 6 && require('zlib').inflateSync(png.subarray(png.indexOf('IDAT') + 4, png.indexOf('IEND') - 8)).every((b, i) => i % 2049 === 0 || (i % 2049 - 1) % 4 !== 3 || b === 0), 'значок первого окна не прозрачный');
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
