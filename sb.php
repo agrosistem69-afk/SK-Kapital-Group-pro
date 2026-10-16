@@ -25,7 +25,7 @@ if (!function_exists('curl_init')) {
     exit;
 }
 
-$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+$method = isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET';
 if ($method === 'OPTIONS') { http_response_code(204); exit; }
 
 // Заголовки, которые нужны базе. Authorization на части хостингов PHP не видит,
