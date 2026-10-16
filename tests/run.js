@@ -998,9 +998,9 @@ test('Работа в списке: процент сверху, «⋯» с ме
     });
     expect(geo.pct <= geo.title && geo.pctText === '40%', 'процент не над работой: ' + JSON.stringify(geo));
     expect(geo.check > geo.titleRight, 'галочка не справа: ' + JSON.stringify(geo));
-    // Полоса процентов как на образце: толщиной 8 px, тёмная на светло-сером фоне.
+    // Полоса процентов как на образце: тонкая (5 px), тёмно-серая на светло-сером фоне.
     const bar = await page.$eval('#tasksContainer .task-bar', el => ({ h: el.getBoundingClientRect().height, fill: getComputedStyle(el.firstElementChild).backgroundColor, w: el.firstElementChild.style.width }));
-    expect(bar.h === 8 && bar.fill === 'rgb(30, 41, 59)' && bar.w === '40%', 'полоса процентов: ' + JSON.stringify(bar));
+    expect(bar.h === 5 && bar.fill === 'rgb(42, 42, 42)' && bar.w === '40%', 'полоса процентов: ' + JSON.stringify(bar));
     expect(!(await visible(page, '#taskMenu')), 'меню открыто без нажатия');
     await page.hover('#tasksContainer .task-row');
     await page.click('#tasksContainer .task-more');
