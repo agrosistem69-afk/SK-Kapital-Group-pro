@@ -928,6 +928,27 @@ test('Вход по отпечатку: включается в «Аккаунт
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
+// ---- Заставка при запуске ----
+test('Заставка: буквы SKKG проявляются, нажатиям не мешает, через 3 секунды исчезает; отпечаток дорисовывает кольцо', async () => {
+    const page = await openApp({ width: 390, height: 844 });
+    expect(await page.$('#splash'), 'заставки нет при запуске');
+    expect(await page.$eval('#splash .sp-word', el => el.textContent) === 'SKKG', 'в заставке нет букв SKKG');
+    expect(await page.$eval('#splash', el => getComputedStyle(el).pointerEvents) === 'none', 'заставка перехватывает нажатия');
+    await page.waitForTimeout(1500);
+    expect(await page.$eval('#splash .sp-word span:last-child', el => +getComputedStyle(el).opacity) > 0.9, 'буквы не проявились');
+    await page.waitForFunction(() => !document.getElementById('splash'), null, { timeout: 5000 });
+    // Успешный отпечаток: вокруг кнопки рисуется кольцо, потом замок гаснет.
+    await page.evaluate(() => {
+        localStorage.setItem('skkg-bio-lock', JSON.stringify({ id: 'AAAA' }));
+        navigator.credentials.get = () => new Promise(r => setTimeout(() => r({}), 100));
+        bioShowLock(); bioUnlock();
+    });
+    expect(await visible(page, '#bioLock .bio-pad'), 'на замке нет круга с отпечатком');
+    await page.waitForFunction(() => document.getElementById('bioLock').classList.contains('bio-ok'), null, { timeout: 3000 });
+    await page.waitForFunction(() => document.getElementById('bioLock').classList.contains('hidden'), null, { timeout: 3000 });
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
 // ---- Ежедневный отчёт ----
 async function openDailyReport(page, profile, role, setup) {
     await page.evaluate(async ({ profile, role, setup }) => {
