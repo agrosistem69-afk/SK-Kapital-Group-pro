@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '46';
+        window.APP_VERSION = '47';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=46">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=46">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=46">
+    <link rel="stylesheet" href="vendor/app.css?v=47">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=47">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=47">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=46" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=46" defer></script>
-    <script src="vendor/jszip.min.js?v=46" defer></script>
+    <script src="vendor/html2canvas.min.js?v=47" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=47" defer></script>
+    <script src="vendor/jszip.min.js?v=47" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=46"></script>
+    <script src="vendor/supabase.js?v=47"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -897,7 +897,7 @@
                     </span>
                     <span class="text-[10.5px] leading-tight font-medium text-center break-words">Ещё</span>
                 </button>
-                <button onclick="openModal('accountModal')" class="flex flex-col items-center justify-center gap-1 py-2 px-0.5 hover:text-brand-600 transition-colors">
+                <button onclick="openModal('accountModal'); bioRenderOption()" class="flex flex-col items-center justify-center gap-1 py-2 px-0.5 hover:text-brand-600 transition-colors">
                     <i class="fa-solid fa-user text-lg"></i>
                     <span class="text-[10.5px] leading-tight font-medium text-center break-words">Аккаунт</span>
                 </button>
@@ -914,11 +914,26 @@
             </div>
             <div class="p-6 space-y-4">
                 <div class="text-sm text-slate-700 font-medium" id="accountModalUserLabel"></div>
+                <label id="bioOption" class="hidden items-start gap-3 p-3 border border-slate-200 rounded-lg cursor-pointer">
+                    <input id="bioToggle" type="checkbox" onchange="bioToggle(this.checked)" class="mt-0.5 w-5 h-5 accent-brand-600 flex-shrink-0">
+                    <span class="text-sm"><span class="font-semibold text-slate-800"><i class="fa-solid fa-fingerprint mr-1 text-brand-600"></i>Вход по отпечатку пальца</span>
+                    <span class="block text-xs text-slate-500 mt-0.5">При открытии приложения на этом телефоне нужно приложить палец (или Face ID). Отпечаток остаётся в телефоне, на сайт он не передаётся.</span></span>
+                </label>
                 <button onclick="handleLogout()" class="w-full bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2">
                     <i class="fa-solid fa-right-from-bracket"></i> Выйти из аккаунта
                 </button>
             </div>
         </div>
+    </div>
+
+    <!-- Замок по отпечатку: закрывает приложение, пока владелец не приложит палец (Face ID) -->
+    <div id="bioLock" class="hidden fixed inset-0 z-[2147483000] bg-slate-900 text-white flex-col items-center justify-center p-6 text-center">
+        <i class="fa-solid fa-fingerprint text-6xl text-brand-400 mb-4"></i>
+        <div class="text-lg font-bold mb-1">SKKG Pro</div>
+        <div class="text-sm text-slate-300 mb-6">Приложите палец, чтобы открыть приложение</div>
+        <button id="bioUnlockBtn" onclick="bioUnlock()" class="w-full max-w-xs bg-brand-600 hover:bg-brand-500 text-white font-semibold py-3 rounded-xl mb-3"><i class="fa-solid fa-fingerprint mr-2"></i>Открыть по отпечатку</button>
+        <button onclick="bioUsePassword()" class="w-full max-w-xs border border-slate-600 text-slate-200 py-3 rounded-xl text-sm">Войти по паролю</button>
+        <div id="bioLockMsg" class="text-xs text-amber-300 mt-4 min-h-[1rem]"></div>
     </div>
 
     <!-- MODAL: ADD / EDIT TASK -->
@@ -2300,8 +2315,88 @@
         }
 
         async function handleLogout() {
+            bioForget();
             await sb.auth.signOut();
         }
+
+        // ---- Вход по отпечатку пальца (по желанию, в «Аккаунте») ----
+        // Используется встроенная в телефон проверка (отпечаток, Face ID) через стандарт WebAuthn.
+        // Это замок приложения на этом устройстве: вход в аккаунт остаётся сохранённым, а открыть
+        // приложение можно, только приложив палец. Отпечаток не покидает телефон.
+        const BIO_KEY = 'skkg-bio-lock';
+        const BIO_RELOCK_MS = 5 * 60 * 1000;   // свернули приложение дольше чем на 5 минут — снова спросить палец
+        let bioHiddenAt = 0;
+        const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        const unb64u = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), c => c.charCodeAt(0));
+        const randomBytes = n => crypto.getRandomValues(new Uint8Array(n));
+        function bioSaved() { try { return JSON.parse(localStorage.getItem(BIO_KEY) || 'null'); } catch (_) { return null; } }
+        function bioForget() { try { localStorage.removeItem(BIO_KEY); } catch (_) {} }
+        async function bioSupported() {
+            try { return !!(window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); } catch (_) { return false; }
+        }
+        async function bioRenderOption() {
+            const box = document.getElementById('bioOption');
+            const ok = await bioSupported();
+            box.classList.toggle('hidden', !ok);
+            box.classList.toggle('flex', ok);
+            document.getElementById('bioToggle').checked = !!bioSaved();
+        }
+        async function bioToggle(on) {
+            const box = document.getElementById('bioToggle');
+            if (!on) { bioForget(); return; }
+            try {
+                const p = currentUserProfile || {};
+                const cred = await navigator.credentials.create({ publicKey: {
+                    challenge: randomBytes(32),
+                    rp: { name: 'SKKG Pro', id: location.hostname },
+                    user: { id: randomBytes(16), name: p.email || p.full_name || 'user', displayName: p.full_name || p.email || 'Пользователь' },
+                    pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+                    authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' },
+                    timeout: 60000,
+                } });
+                localStorage.setItem(BIO_KEY, JSON.stringify({ id: b64u(cred.rawId), user: p.id || null }));
+                box.checked = true;
+            } catch (e) {
+                box.checked = false;
+                alert('Не получилось включить вход по отпечатку: ' + (e && e.name === 'NotAllowedError' ? 'проверка отменена.' : (e && e.message) || e));
+            }
+        }
+        function bioShowLock() {
+            const el = document.getElementById('bioLock');
+            el.classList.remove('hidden'); el.classList.add('flex');
+            document.getElementById('bioLockMsg').textContent = '';
+        }
+        function bioHideLock() {
+            const el = document.getElementById('bioLock');
+            el.classList.add('hidden'); el.classList.remove('flex');
+        }
+        async function bioUnlock() {
+            const saved = bioSaved();
+            if (!saved) { bioHideLock(); return; }
+            try {
+                await navigator.credentials.get({ publicKey: {
+                    challenge: randomBytes(32),
+                    allowCredentials: [{ type: 'public-key', id: unb64u(saved.id) }],
+                    userVerification: 'required',
+                    timeout: 60000,
+                } });
+                bioHideLock();
+            } catch (e) {
+                document.getElementById('bioLockMsg').textContent = e && e.name === 'NotAllowedError'
+                    ? 'Отпечаток не подтверждён. Нажмите «Открыть по отпечатку» ещё раз.'
+                    : 'Не получилось проверить отпечаток. Можно войти по паролю.';
+            }
+        }
+        async function bioUsePassword() {
+            bioForget();
+            bioHideLock();
+            await handleLogout();
+        }
+        if (bioSaved()) { bioShowLock(); bioUnlock(); }
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') { bioHiddenAt = Date.now(); return; }
+            if (bioSaved() && bioHiddenAt && Date.now() - bioHiddenAt > BIO_RELOCK_MS) { bioShowLock(); bioUnlock(); }
+        });
 
         // Флаг защищает от повторного вызова onLoggedIn(), если и onAuthStateChange,
         // и прямая проверка ниже одновременно найдут одну и ту же сессию.

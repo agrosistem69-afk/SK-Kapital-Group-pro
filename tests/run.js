@@ -874,6 +874,60 @@ function seedScheduleItem(page, settings) {
     }, settings);
 }
 
+// ---- Вход по отпечатку пальца ----
+test('Вход по отпечатку: включается в «Аккаунте», при открытии просит палец, «Войти по паролю» выходит', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    page.errors = [];
+    page.on('pageerror', e => page.errors.push(e.message));
+    page.on('dialog', d => { page.errors.push('сообщение: ' + d.message()); d.dismiss(); });
+    await page.route(/^https?:\/\/(?!127\.0\.0\.1|localhost)/, r => r.fulfill({ status: 200, body: '' }));
+    await page.route(/vendor\/supabase\.js/, r => r.fulfill({ contentType: 'application/javascript', body: FAKE_SUPABASE }));
+    await page.route(/vendor\/app\.css/, r => r.fulfill({ contentType: 'text/css', body: css }));
+    await page.route(/service-worker\.js/, r => r.fulfill({ contentType: 'application/javascript', body: 'self.addEventListener("install", () => self.skipWaiting());' }));
+    // Встроенный в Chromium «телефон с отпечатком»: проверка пальца всегда проходит.
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('WebAuthn.enable');
+    const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true } });
+    // Отпечаток работает только на имени сайта (не на IP), поэтому здесь localhost.
+    const url = baseUrl.replace('127.0.0.1', 'localhost') + '/index.html';
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => typeof bioToggle === 'function');
+    expect(!(await visible(page, '#bioLock')), 'замок показан, хотя отпечаток не включали');
+    await page.evaluate(() => {
+        ['authCheckingScreen', 'loginScreen'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
+        currentUserProfile = { id: 'u1', full_name: 'Грег', email: 'g@x.ru' }; openModal('accountModal'); return bioRenderOption(); });
+    expect(await visible(page, '#bioOption'), 'в «Аккаунте» нет переключателя отпечатка');
+    await page.click('#bioToggle');
+    await page.waitForFunction(() => !!localStorage.getItem('skkg-bio-lock'));
+    expect(await page.isChecked('#bioToggle'), 'переключатель не включился');
+    const creds = (await cdp.send('WebAuthn.getCredentials', { authenticatorId })).credentials;
+    expect(creds.length === 1, 'отпечаток не зарегистрирован');
+    // Открываю приложение заново: сразу замок, отпечаток проходит — замок исчезает.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => window.__bioSeen = window.__bioSeen || !document.getElementById('bioLock').classList.contains('hidden'), null, { timeout: 5000 }).catch(() => {});
+    await page.waitForFunction(() => document.getElementById('bioLock').classList.contains('hidden'), null, { timeout: 5000 });
+    // Отпечаток не подтверждён — замок остаётся, приложение закрыто.
+    await cdp.send('WebAuthn.setUserVerified', { authenticatorId, isUserVerified: false });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => /не подтверждён|Не получилось/.test(document.getElementById('bioLockMsg').textContent), null, { timeout: 10000 });
+    expect(await visible(page, '#bioLock'), 'без отпечатка приложение открылось');
+    await cdp.send('WebAuthn.setUserVerified', { authenticatorId, isUserVerified: true });
+    await page.click('#bioUnlockBtn');
+    await page.waitForFunction(() => document.getElementById('bioLock').classList.contains('hidden'), null, { timeout: 5000 });
+    // «Войти по паролю»: замок снимается, отпечаток забывается, показывается вход.
+    await page.evaluate(() => bioShowLock());
+    await page.click('#bioLock button:has-text("Войти по паролю")');
+    await page.waitForFunction(() => document.getElementById('bioLock').classList.contains('hidden') && !localStorage.getItem('skkg-bio-lock'));
+    // Выключение в «Аккаунте» убирает замок.
+    await page.evaluate(() => localStorage.setItem('skkg-bio-lock', JSON.stringify({ id: 'AAAA' })));
+    await page.evaluate(() => { ['authCheckingScreen', 'loginScreen'].forEach(id => document.getElementById(id)?.classList.add('hidden')); openModal('accountModal'); return bioRenderOption(); });
+    expect(await page.isChecked('#bioToggle'), 'переключатель не показывает, что отпечаток включён');
+    await page.click('#bioToggle');
+    expect(await page.evaluate(() => localStorage.getItem('skkg-bio-lock')) === null, 'отпечаток не выключился');
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
 // ---- Ежедневный отчёт ----
 async function openDailyReport(page, profile, role, setup) {
     await page.evaluate(async ({ profile, role, setup }) => {
