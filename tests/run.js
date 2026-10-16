@@ -1397,7 +1397,8 @@ test('sb.php пересылает запросы в базу и не пуска�
     await new Promise(r => upstream.listen(0, '127.0.0.1', r));
     const port = 20000 + Math.floor(Math.random() * 20000);
     const { spawn } = require('child_process');
-    const php = spawn('php', ['-S', `127.0.0.1:${port}`, '-t', ROOT], { env: Object.assign({}, process.env, { SB_UPSTREAM: `http://127.0.0.1:${upstream.address().port}` }), stdio: 'ignore' });
+    // Как на хостинге: предупреждения PHP включены — в ответ они попадать не должны.
+    const php = spawn('php', ['-d', 'display_errors=1', '-d', 'error_reporting=-1', '-S', `127.0.0.1:${port}`, '-t', ROOT], { env: Object.assign({}, process.env, { SB_UPSTREAM: `http://127.0.0.1:${upstream.address().port}` }), stdio: 'ignore' });
     try {
         const base = `http://127.0.0.1:${port}/sb.php?u=`;
         let r;
