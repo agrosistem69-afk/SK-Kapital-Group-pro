@@ -7321,6 +7321,26 @@
         const ZONE_COLORS = ['#2563eb', '#16a34a', '#ea580c', '#9333ea', '#db2777', '#0891b2', '#ca8a04', '#dc2626'];
         let zonesState = null, zonesPointerReady = false;
 
+        // Лист из PDF — это картинка (<img id="img" src="data:image/...">). Замечания рисуем поверх неё,
+        // координаты — в точках картинки, поэтому пометки остаются на месте при любом масштабе.
+        async function parseImagePlan(html) {
+            const m = html.match(/<img\b[^>]*\bid="img"[^>]*\bsrc="(data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+\/=]+)"/);
+            if (!m) return null;
+            const img = new Image();
+            img.src = m[1];
+            try { await img.decode(); } catch (e) { return null; }
+            const w = img.naturalWidth, h = img.naturalHeight;
+            return w && h ? { image: m[1], viewBox: [0, 0, w, h], frames: [], callouts: [] } : null;
+        }
+        function imagePlanRoot(plan) {
+            const NS = 'http://www.w3.org/2000/svg', root = document.createElementNS(NS, 'svg'), im = document.createElementNS(NS, 'image');
+            im.setAttribute('href', plan.image);
+            im.setAttribute('width', plan.viewBox[2]);
+            im.setAttribute('height', plan.viewBox[3]);
+            root.appendChild(im);
+            return root;
+        }
+
         function sanitizePlanSvg(inner) {
             const doc = new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg">${inner}</svg>`, 'image/svg+xml');
             if (doc.querySelector('parsererror')) return null;
@@ -9499,9 +9519,9 @@
                 if (notesState !== st) return;
                 st.html = blob ? await blob.text() : '';
             }
-            const plan = await parsePlanData(st.html || '');
+            const plan = await parsePlanData(st.html || '') || await parseImagePlan(st.html || '');
             if (notesState !== st) return;
-            const root = plan && sanitizePlanSvg(plan.svg);
+            const root = plan && (plan.image ? imagePlanRoot(plan) : sanitizePlanSvg(plan.svg));
             if (!root) { show('В этом листе нет плана, на котором можно рисовать замечания.'); return; }
             const g = document.getElementById('notesPlan');
             g.replaceChildren(...[...root.childNodes].map(n => document.importNode(n, true)));

@@ -179,7 +179,7 @@ test('Загрузка листа: внутри проекта — только 
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
-test('Весь комплект листов: разделы и листы по номерам, разделы свёрнуты, поиск по марке; лист-картинка открывается', async () => {
+test('Весь комплект листов: разделы и листы по номерам, разделы свёрнуты, поиск по марке; лист-картинка открывается, на нём рисуются замечания', async () => {
     const page = await openApp();
     await page.evaluate(() => {
         const add = (section, sheet, i) => __db.drawings.push({ id: 'g' + i, project_id: 'p1', section, sheet, file_path: 'p1/g' + i + '.html', revision_date: '2024-11-12', updated_at: '2026-10-17T10:00:00Z' });
@@ -190,7 +190,10 @@ test('Весь комплект листов: разделы и листы по 
         ['2.10 Разбивочный план МАФ. Часть 3', '2.1 Разбивочный план благоустройства. Часть 1', '2.2 Разбивочный план благоустройства. Часть 2'].forEach(s => add('2. Разбивочные планы', s, i++));
         ['12.1 План освещения', '12.2 План фундаментов освещения'].forEach(s => add('12. Освещение', s, i++));
         // Лист из PDF: только картинка с приближением, без плана для замечаний.
-        __files['p1/g2.html'] = '<!doctype html><html><body><div id="v"><img id="img" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></div><div id="tb"><button id="zf">x</button></div></body></html>';
+        // Лист из PDF: картинка 40×20 с приближением, без векторного плана.
+        const c = document.createElement('canvas'); c.width = 40; c.height = 20;
+        const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, 40, 20); x.fillStyle = '#000'; x.fillRect(5, 5, 30, 10);
+        __files['p1/g2.html'] = `<!doctype html><html><body><div id="v"><img id="img" alt="лист" src="${c.toDataURL('image/jpeg', 0.9)}"></div><div id="tb"><button id="zf">x</button></div></body></html>`;
     });
     await page.click('#navDrawingsBtn');
     await page.waitForFunction(() => document.querySelectorAll('#allDrawingsList details.drawing-group').length >= 5);
@@ -220,8 +223,13 @@ test('Весь комплект листов: разделы и листы по 
     await page.waitForFunction(() => document.getElementById('drawingViewerLoading').classList.contains('hidden'), null, { timeout: 15000 });
     const frameOk = await page.frameLocator('#drawingViewerFrame').locator('#img').count();
     expect(frameOk === 1, 'лист-картинка не открылся в просмотре');
+    // Замечания рисуются поверх картинки листа: план — сама картинка, размер в её точках, скачивается JPEG.
     await page.click('#notesToggleBtn');
-    await page.waitForFunction(() => /нет плана/.test(document.getElementById('notesMsg').textContent), null, { timeout: 15000 });
+    await page.waitForFunction(() => notesState?.plan, null, { timeout: 15000 });
+    const plan = await page.evaluate(() => ({ vb: notesState.baseVb, img: !!document.querySelector('#notesPlan image[href^="data:image/jpeg"]'), msg: document.getElementById('notesMsg').classList.contains('hidden') }));
+    expect(plan.img && plan.msg && plan.vb.join(',') === '0,0,40,20', 'на листе-картинке нельзя рисовать замечания: ' + JSON.stringify(plan));
+    const jpeg = await page.evaluate(async () => (await notesBuildJpeg())?.size || 0);
+    expect(jpeg > 1000, 'замечания листа-картинки не скачиваются картинкой');
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
