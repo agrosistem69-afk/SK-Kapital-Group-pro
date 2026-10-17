@@ -17,10 +17,10 @@
     </script>
 
     <!-- PWA -->
-    <link rel="manifest" href="manifest.json?v=52">
-    <link rel="icon" type="image/png" href="favicon.png?v=52">
+    <link rel="manifest" href="manifest.json?v=53">
+    <link rel="icon" type="image/png" href="favicon.png?v=53">
     <meta name="theme-color" content="#0b1730">
-    <link rel="apple-touch-icon" href="icons/icon-192.png?v=52">
+    <link rel="apple-touch-icon" href="icons/icon-192.png?v=53">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="SKKG Pro">
@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '52';
+        window.APP_VERSION = '53';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,21 +74,26 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=52">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=52">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=52">
+    <link rel="stylesheet" href="vendor/app.css?v=53">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=53">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=53">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=52" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=52" defer></script>
-    <script src="vendor/jszip.min.js?v=52" defer></script>
+    <script src="vendor/html2canvas.min.js?v=53" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=53" defer></script>
+    <script src="vendor/jszip.min.js?v=53" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=52"></script>
+    <script src="vendor/supabase.js?v=53"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* Разделы листов на экране «Чертежи»: свой значок-стрелка вместо стандартного треугольника */
+        .drawing-group > summary { list-style: none; }
+        .drawing-group > summary::-webkit-details-marker { display: none; }
+        .drawing-group[open] > summary .fa-chevron-right { transform: rotate(90deg); }
 
         /* Drag & drop задач */
         .task-row.dragging { opacity: 0.4; }
@@ -338,9 +343,15 @@
             <button id="drawingsBackToProject" onclick="openProject(appData.currentProjectId)" class="hidden text-sm text-brand-600 hover:text-brand-700 font-semibold mb-2"><i class="fa-solid fa-arrow-left mr-1"></i> <span></span></button>
             <p id="drawingsScreenHint" class="text-sm text-slate-500 mb-4">Актуальные листы по всем вашим проектам. У каждого листа указана дата редакции: чем зеленее отметка, тем свежее лист.</p>
             <div id="drawingsScreenFormSlot"></div>
-            <select id="drawingsProjectFilter" onchange="renderAllDrawings()" class="bg-white border border-slate-300 rounded-lg text-sm px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-brand-500">
-                <option value="all">Все проекты</option>
-            </select>
+            <div class="flex flex-wrap gap-2 mb-4">
+                <select id="drawingsProjectFilter" onchange="renderAllDrawings()" class="bg-white border border-slate-300 rounded-lg text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500">
+                    <option value="all">Все проекты</option>
+                </select>
+                <div class="relative flex-1 min-w-[12rem]">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                    <input id="drawingsSearch" type="search" oninput="drawAllDrawings()" placeholder="Найти лист: номер или название, например КО-2" class="w-full bg-white border border-slate-300 rounded-lg text-sm pl-8 pr-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500">
+                </div>
+            </div>
             <div id="allDrawingsList" class="space-y-6"></div>
         </div>
 
@@ -6349,14 +6360,25 @@
             appData.drawings = data;
         }
 
-        function renderDrawingGroups(data) {
+        // Разделы и листы — по номерам как в проекте: 2 раньше 10, лист 9.2 раньше 9.10.
+        const naturalCmp = (a, b) => String(a || '').localeCompare(String(b || ''), 'ru', { numeric: true });
+        const drawingsOpenSections = new Set();
+        // Когда листов много (весь комплект проекта), разделы свёрнуты: видно оглавление, нужный раздел раскрывают.
+        // При поиске (open = true) раскрыты все найденные.
+        function renderDrawingGroups(data, open = false) {
             const bySection = {};
             data.forEach(d => { (bySection[d.section || 'Без раздела'] = bySection[d.section || 'Без раздела'] || []).push(d); });
-            return Object.keys(bySection).map(section => `
-                <div>
-                    <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-2">${escapeHtml(section)}</div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                        ${bySection[section].map(d => `
+            const many = data.length > 12;
+            const names = Object.keys(bySection).sort((a, b) => a === 'Без раздела' ? 1 : b === 'Без раздела' ? -1 : naturalCmp(a, b));
+            return names.map(section => `
+                <details class="drawing-group" data-sec="${escapeHtml(section)}" ${open || !many || drawingsOpenSections.has(section) ? 'open' : ''} ontoggle="if (!this.dataset.search) drawingsOpenSections[this.open ? 'add' : 'delete'](this.dataset.sec)" ${open ? 'data-search="1"' : ''}>
+                    <summary class="flex items-center gap-2 cursor-pointer select-none mb-2 py-1">
+                        <i class="fa-solid fa-chevron-right text-[10px] text-slate-400 transition-transform"></i>
+                        <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wide flex-1">${escapeHtml(section)}</span>
+                        <span class="text-[11px] font-semibold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">${bySection[section].length}</span>
+                    </summary>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mb-2">
+                        ${bySection[section].sort((a, b) => naturalCmp(a.sheet, b.sheet)).map(d => `
                             <button onclick="openDrawingViewer('${d.id}')" class="flex items-center gap-3 text-left border border-slate-200 rounded-lg px-3 py-2.5 bg-slate-50 hover:bg-brand-50 hover:border-brand-200 transition-colors">
                                 <div class="w-9 h-9 rounded-lg bg-white border border-slate-200 text-brand-600 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-map"></i></div>
                                 <div class="min-w-0 flex-1">
@@ -6368,7 +6390,7 @@
                             </button>
                         `).join('')}
                     </div>
-                </div>
+                </details>
             `).join('');
         }
 
@@ -6419,8 +6441,21 @@
                 return;
             }
             appData.drawings = data || [];
-            if (!data || data.length === 0) {
+            drawAllDrawings();
+        }
+
+        // Список на экране «Чертежи» из уже загруженных листов, с поиском по номеру и названию листа.
+        function drawAllDrawings() {
+            const listEl = document.getElementById('allDrawingsList');
+            const all = appData.drawings || [];
+            if (!all.length) {
                 listEl.innerHTML = '<div class="text-sm text-slate-400 py-2">Чертежей пока нет</div>';
+                return;
+            }
+            const words = normName(document.getElementById('drawingsSearch')?.value).split(' ').filter(Boolean);
+            const data = words.length ? all.filter(d => { const t = normName(`${d.sheet} ${d.section}`); return words.every(w => t.includes(w)); }) : all;
+            if (!data.length) {
+                listEl.innerHTML = '<div class="text-sm text-slate-400 py-2">Ничего не найдено. Попробуйте номер листа (например 9.36) или марку (например КО-2).</div>';
                 return;
             }
 
@@ -6436,7 +6471,7 @@
                             <h3 class="text-base font-bold text-slate-900">${escapeHtml(projectName(pid))}</h3>
                             ${latest[pid] ? `<div class="text-xs">${drawingRevisionBadge(latest[pid])}</div>` : '<div class="text-[11px] text-slate-400">Дата редакции не указана</div>'}
                         </div>
-                        <div class="space-y-4">${renderDrawingGroups(byProject[pid])}</div>
+                        <div class="space-y-2">${renderDrawingGroups(byProject[pid], words.length > 0)}</div>
                     </div>
                 `).join('');
         }

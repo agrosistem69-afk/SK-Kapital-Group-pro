@@ -179,6 +179,52 @@ test('Загрузка листа: внутри проекта — только 
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
+test('Весь комплект листов: разделы и листы по номерам, разделы свёрнуты, поиск по марке; лист-картинка открывается', async () => {
+    const page = await openApp();
+    await page.evaluate(() => {
+        const add = (section, sheet, i) => __db.drawings.push({ id: 'g' + i, project_id: 'p1', section, sheet, file_path: 'p1/g' + i + '.html', revision_date: '2024-11-12', updated_at: '2026-10-17T10:00:00Z' });
+        let i = 0;
+        ['9.10 Архитектурные решения МАФ. ЦИЛ-1', '9.2 Архитектурные решения МАФ. ЛБ-1. Лежак', '9.36 Архитектурные решения МАФ. КО-1. КО-2. Колесоотбойники', '9.1 План расстановки МАФ']
+            .forEach(s => add('9. МАФ: архитектурные решения', s, i++));
+        ['10.25 План фундаментов для КО-2', '10.13 План фундаментов для СЛ-2, ДОР-1, ДОР-2, КО-1', '10.2 План фундаментов ворот'].forEach(s => add('10. Фундаменты МАФ', s, i++));
+        ['2.10 Разбивочный план МАФ. Часть 3', '2.1 Разбивочный план благоустройства. Часть 1', '2.2 Разбивочный план благоустройства. Часть 2'].forEach(s => add('2. Разбивочные планы', s, i++));
+        ['12.1 План освещения', '12.2 План фундаментов освещения'].forEach(s => add('12. Освещение', s, i++));
+        // Лист из PDF: только картинка с приближением, без плана для замечаний.
+        __files['p1/g2.html'] = '<!doctype html><html><body><div id="v"><img id="img" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></div><div id="tb"><button id="zf">x</button></div></body></html>';
+    });
+    await page.click('#navDrawingsBtn');
+    await page.waitForFunction(() => document.querySelectorAll('#allDrawingsList details.drawing-group').length >= 5);
+    const groups = await page.$$eval('#allDrawingsList details.drawing-group', els => els.map(e => ({ sec: e.dataset.sec, open: e.open, sheets: [...e.querySelectorAll('button .text-sm')].map(x => x.textContent.trim()) })));
+    const secs = groups.map(g => g.sec);
+    expect(secs.indexOf('2. Разбивочные планы') < secs.indexOf('9. МАФ: архитектурные решения') && secs.indexOf('9. МАФ: архитектурные решения') < secs.indexOf('10. Фундаменты МАФ') && secs.indexOf('10. Фундаменты МАФ') < secs.indexOf('12. Освещение'), 'разделы не по номерам: ' + secs.join(' / '));
+    const maf = groups.find(g => g.sec.startsWith('9.')).sheets.map(s => s.split(' ')[0]);
+    expect(maf.join(',') === '9.1,9.2,9.10,9.36', 'листы МАФ не по номерам: ' + maf.join(','));
+    const fund = groups.find(g => g.sec.startsWith('10.')).sheets.map(s => s.split(' ')[0]);
+    expect(fund.join(',') === '10.2,10.13,10.25', 'листы фундаментов не по номерам: ' + fund.join(','));
+    expect(groups.every(g => !g.open), 'при большом комплекте разделы должны быть свёрнуты');
+    // Раскрытый раздел остаётся раскрытым после перерисовки.
+    await page.click('details.drawing-group[data-sec="12. Освещение"] > summary');
+    await page.waitForFunction(() => drawingsOpenSections.has('12. Освещение'));
+    await page.evaluate(() => drawAllDrawings());
+    expect(await page.$eval('details.drawing-group[data-sec="12. Освещение"]', e => e.open), 'раскрытый раздел свернулся после обновления списка');
+    // Поиск по марке: только листы с КО-2, разделы раскрыты.
+    await page.fill('#drawingsSearch', 'ко-2');
+    const found = await page.$$eval('#allDrawingsList details.drawing-group', els => els.map(e => ({ open: e.open, sheets: [...e.querySelectorAll('button .text-sm')].map(x => x.textContent.trim()) })));
+    const names = found.flatMap(g => g.sheets);
+    expect(names.length === 2 && names.every(n => /КО-2/.test(n)) && found.every(g => g.open), 'поиск «ко-2» нашёл не то: ' + names.join(' / '));
+    await page.fill('#drawingsSearch', 'нет такого листа');
+    expect((await page.textContent('#allDrawingsList')).includes('Ничего не найдено'), 'нет подсказки, когда поиск ничего не нашёл');
+    // Лист-картинка открывается в просмотре, а «Замечания» честно говорят, что рисовать не на чем.
+    await page.fill('#drawingsSearch', '9.36');
+    await page.click('#allDrawingsList button:has-text("9.36")');
+    await page.waitForFunction(() => document.getElementById('drawingViewerLoading').classList.contains('hidden'), null, { timeout: 15000 });
+    const frameOk = await page.frameLocator('#drawingViewerFrame').locator('#img').count();
+    expect(frameOk === 1, 'лист-картинка не открылся в просмотре');
+    await page.click('#notesToggleBtn');
+    await page.waitForFunction(() => /нет плана/.test(document.getElementById('notesMsg').textContent), null, { timeout: 15000 });
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
 test('Ведомость материалов читается из чертежа', async () => {
     const page = await openApp();
     const rows = await page.evaluate(html => extractDrawingQuantities(html).map(r => [r.pos, r.name, r.unit, r.qty]), SHEET_HTML);

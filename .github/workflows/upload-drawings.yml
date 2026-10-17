@@ -1,0 +1,56 @@
+name: Загрузка листов в «Чертежи»
+
+# Выкладывает пачку готовых HTML-листов в базу (bucket drawings + таблица drawings).
+# Запускается вручную на ветке, где лежат листы и manifest.json (см. tools/upload_drawings.py).
+# Нужен секрет SUPABASE_SERVICE_KEY (Settings → Secrets and variables → Actions). В коде ключа нет.
+on:
+  workflow_dispatch:
+    inputs:
+      folder:
+        description: 'Папка с листами и manifest.json'
+        required: true
+        default: 'drawings-upload'
+      project_sheet:
+        description: 'Проект определяется по уже загруженному листу, в названии которого есть этот текст'
+        required: true
+        default: 'посадочный план'
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: https://pgejlzsfofkgdsgwptfa.supabase.co
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Проверка секрета
+        run: |
+          if [ -z "$SUPABASE_SERVICE_KEY" ]; then
+            echo "::error::Нет секрета SUPABASE_SERVICE_KEY. Добавьте его в Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+      - name: Проект и список листов
+        env:
+          FOLDER: ${{ inputs.folder }}
+          PROJECT_SHEET: ${{ inputs.project_sheet }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.parse, urllib.request
+          url, key = os.environ['SUPABASE_URL'], os.environ['SUPABASE_SERVICE_KEY']
+          q = urllib.parse.urlencode({'select': 'project_id,sheet', 'sheet': f"ilike.*{os.environ['PROJECT_SHEET']}*"})
+          req = urllib.request.Request(f'{url}/rest/v1/drawings?{q}', headers={'apikey': key, 'Authorization': f'Bearer {key}'})
+          rows = json.load(urllib.request.urlopen(req))
+          ids = sorted({r['project_id'] for r in rows})
+          if len(ids) != 1:
+              raise SystemExit(f'Нужен ровно один проект, найдено {len(ids)}: {rows}')
+          print('Проект найден по листу:', rows[0]['sheet'])
+          path = os.path.join(os.environ['FOLDER'], 'manifest.json')
+          items = json.load(open(path, encoding='utf-8'))
+          for it in items:
+              it['project_id'] = ids[0]
+          json.dump(items, open(path, 'w', encoding='utf-8'), ensure_ascii=False)
+          print('Листов к загрузке:', len(items))
+          PY
+      - name: Загрузка
+        working-directory: ${{ inputs.folder }}
+        run: python3 "$GITHUB_WORKSPACE/tools/upload_drawings.py" manifest.json
