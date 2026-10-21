@@ -17,10 +17,10 @@
     </script>
 
     <!-- PWA -->
-    <link rel="manifest" href="manifest.json?v=55">
-    <link rel="icon" type="image/png" href="favicon.png?v=55">
+    <link rel="manifest" href="manifest.json?v=56">
+    <link rel="icon" type="image/png" href="favicon.png?v=56">
     <meta name="theme-color" content="#0b1730">
-    <link rel="apple-touch-icon" href="icons/icon-192.png?v=55">
+    <link rel="apple-touch-icon" href="icons/icon-192.png?v=56">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="SKKG Pro">
@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '55';
+        window.APP_VERSION = '56';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=55">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=55">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=55">
+    <link rel="stylesheet" href="vendor/app.css?v=56">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=56">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=56">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=55" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=55" defer></script>
-    <script src="vendor/jszip.min.js?v=55" defer></script>
+    <script src="vendor/html2canvas.min.js?v=56" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=56" defer></script>
+    <script src="vendor/jszip.min.js?v=56" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=55"></script>
+    <script src="vendor/supabase.js?v=56"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -9383,6 +9383,8 @@
                 notesState.mafData = parseMafItems(html);
                 const mafBtn = document.getElementById('mafBtn');
                 mafBtn.classList.toggle('hidden', !notesState.mafData); mafBtn.classList.toggle('flex', !!notesState.mafData);
+                // Лист с МАФ сразу открывается в режиме отметок: на нём ради этого и работают.
+                if (notesState.mafData && !notesState.open) drawingStage('maf');
             }
             if (drawingViewerUrl) URL.revokeObjectURL(drawingViewerUrl);
             drawingViewerUrl = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
@@ -9528,7 +9530,9 @@
                 if (!btn || !lbl) return;
                 lbl.textContent = on ? 'К чертежу' : text;
                 // На телефоне подписи только у открытого режима, остальные кнопки — значки.
-                lbl.classList.toggle('hidden', !on); lbl.classList.toggle('sm:inline', !on);
+                // «МАФ» подписан всегда — иначе на телефоне кнопку не найти.
+                const always = mode === 'maf';
+                lbl.classList.toggle('hidden', !on && !always); lbl.classList.toggle('sm:inline', !on && !always);
                 btn.classList.toggle('bg-brand-600', on); btn.classList.toggle('bg-white/10', !on);
             });
         }

@@ -1718,6 +1718,8 @@ async function openStage(page, html, btn) {
         appData.drawings = __db.drawings.map(d => ({ ...d }));
         await openDrawingViewer('d1');
     }, html);
+    // Лист с МАФ сам открывается в режиме «МАФ» — дожидаемся, пока план и отметки загрузятся.
+    await page.waitForFunction(() => !notesState?.mafData || (notesState.open && notesState.vb && notesState.maf.loaded), null, { timeout: 15000 });
     if (btn) {
         await page.click(btn);
         await page.waitForFunction(() => notesState?.vb && notesState.open, null, { timeout: 15000 });
@@ -1728,8 +1730,7 @@ async function stageTap(page, x, y) { const [sx, sy] = await notesToScreen(page,
 test('МАФ: отмечаю установленные на плане — видно факт и остаток, в «Объёмах» тоже', async () => {
     const page = await openApp({ admin: true });
     await openStage(page, mafSheetHtml());
-    expect(await page.$eval('#mafBtn', b => !b.classList.contains('hidden')), 'у листа с МАФ нет кнопки «МАФ»');
-    await page.click('#mafBtn');
+    expect(await page.$eval('#mafBtn', b => !b.classList.contains('hidden') && b.innerText.includes('К чертежу')), 'лист с МАФ не открылся сразу в режиме «МАФ»');
     await page.waitForFunction(() => notesState?.maf.loaded && document.querySelectorAll('#notesMarks [data-maf]').length === 3, null, { timeout: 15000 });
     expect((await page.textContent('#mafTotals')).replace(/\s+/g, ' ').includes('Установлено 0 из 3 · осталось 3'), 'неверный итог до отметок: ' + await page.textContent('#mafTotals'));
     // Урна А1 маленькая (30 см) — попадаем по кружку вокруг неё.
@@ -1772,7 +1773,7 @@ test('МАФ: отмечаю установленные на плане — ви
 test('МАФ: без прав ответственного отметку поставить нельзя; без таблицы — подсказка', async () => {
     const page = await openApp({ admin: false });
     await page.evaluate(() => { __missingTables.push('maf_installs'); });
-    await openStage(page, mafSheetHtml(), '#mafBtn');
+    await openStage(page, mafSheetHtml());
     await page.waitForFunction(() => notesState?.maf.loaded);
     expect((await page.textContent('#notesList')).includes('maf_installs.sql'), 'нет подсказки про таблицу maf_installs');
     let msg = '';
