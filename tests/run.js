@@ -1701,7 +1701,7 @@ test('Нет связи с базой — кнопка «Войти» показ
 // Лист МАФ: две линии борта (y = 10 и y = 20 м), три МАФ с номерами, ведомость и список МАФ для отметок.
 function mafSheetHtml() {
     const box = ([x0, x1, y0, y1]) => `M${x0} ${y0}L${x1} ${y0} ${x1} ${y1} ${x0} ${y1}z`;
-    const items = [{ id: 'А1', p: 'У-1', box: [5, 5.3, 11, 11.3] }, { id: 'А2', p: 'У-1', box: [10, 10.3, 11, 11.3] }, { id: 'А3', p: 'СК-1', box: [20, 22, 11, 11.6] }];
+    const items = [{ id: 'А1', p: 'У-1', z: 'Двор', box: [5, 5.3, 11, 11.3] }, { id: 'А2', p: 'У-1', z: 'Бульвар', box: [10, 10.3, 11, 11.3] }, { id: 'А3', p: 'СК-1', z: 'Двор', box: [20, 22, 11, 11.6] }];
     const plan = '<path class="st" data-s="ctx" stroke="#777" d="M0 10L40 10"/><path class="st" data-s="ctx" stroke="#777" d="M0 20L40 20"/>'
         + items.map(i => `<g class="it" data-s="maf" data-p="${i.p}" data-id="${i.id}"><path class="mf" fill="#f97316" d="${box(i.box)}"/></g>`).join('');
     const planz = require('zlib').gzipSync(Buffer.from(plan)).toString('base64');
@@ -1749,6 +1749,11 @@ test('МАФ: отмечаю установленные на плане — ви
     await stageTap(page, 21, 11.3);
     await stageTap(page, 10.15, 11.15);
     await page.waitForFunction(() => __db.maf_installs.length === 2);
+    // Участок: только МАФ двора — итог и таблица по нему, план приближается к участку.
+    await page.selectOption('#mafZone', 'Двор');
+    expect((await page.textContent('#mafTotals')).replace(/\s+/g, ' ').includes('Установлено 1 из 2 · осталось 1'), 'итог по участку «Двор»: ' + await page.textContent('#mafTotals'));
+    expect(await page.$$eval('[data-maf-mark]', r => r.map(x => x.dataset.mafMark).join()) === 'СК-1,У-1', 'марки участка не по порядку');
+    await page.selectOption('#mafZone', '');
     // По марке — список номеров, каждый можно показать на плане.
     await page.click('[data-maf-mark="У-1"]');
     expect((await page.textContent('#notesList')).includes('А2'), 'нет списка урн по номерам');

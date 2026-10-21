@@ -17,10 +17,10 @@
     </script>
 
     <!-- PWA -->
-    <link rel="manifest" href="manifest.json?v=54">
-    <link rel="icon" type="image/png" href="favicon.png?v=54">
+    <link rel="manifest" href="manifest.json?v=55">
+    <link rel="icon" type="image/png" href="favicon.png?v=55">
     <meta name="theme-color" content="#0b1730">
-    <link rel="apple-touch-icon" href="icons/icon-192.png?v=54">
+    <link rel="apple-touch-icon" href="icons/icon-192.png?v=55">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="SKKG Pro">
@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '54';
+        window.APP_VERSION = '55';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=54">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=54">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=54">
+    <link rel="stylesheet" href="vendor/app.css?v=55">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=55">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=55">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=54" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=54" defer></script>
-    <script src="vendor/jszip.min.js?v=54" defer></script>
+    <script src="vendor/html2canvas.min.js?v=55" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=55" defer></script>
+    <script src="vendor/jszip.min.js?v=55" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=54"></script>
+    <script src="vendor/supabase.js?v=55"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -9415,7 +9415,7 @@
             notesState = drawing ? { drawing, projectId: drawing.project_id, sheet: normName(drawing.sheet), html: null, plan: null, vb: null, baseVb: null,
                 tool: 'pan', color: NOTE_COLORS[0], font: 'm', marks: [], draft: null, selected: null, open: false, error: '', author: '',
                 set: null, newSets: [], mode: 'notes', measures: [], rulerA: null, mdraft: null, snap: null, scale: null,
-                mafData: null, maf: { loaded: false, installs: [], error: '', tool: 'mark', focus: '' } } : null;
+                mafData: null, maf: { loaded: false, installs: [], error: '', tool: 'mark', focus: '', zone: '' } } : null;
             document.getElementById('notesStage').classList.add('hidden');
             document.getElementById('notesStage').classList.remove('flex');
             document.getElementById('drawingViewerFrame').classList.remove('hidden');
@@ -10005,7 +10005,7 @@
             try {
                 const d = JSON.parse(m[1]);
                 const items = (d.items || []).filter(i => i && i.id && i.p && Array.isArray(i.box) && i.box.length === 4 && i.box.every(Number.isFinite))
-                    .map(i => ({ id: String(i.id), p: String(i.p), box: i.box.map(Number) }));
+                    .map(i => ({ id: String(i.id), p: String(i.p), z: i.z ? String(i.z) : '', box: i.box.map(Number) }));
                 return items.length ? { items, names: d.names || {} } : null;
             } catch (e) { return null; }
         }
@@ -10110,17 +10110,32 @@
         }
         const mafInstalled = () => new Map(notesState.maf.installs.map(r => [r.item_id, r]));
         // По каждой марке: по проекту (сколько на плане), установлено и осталось.
+        // МАФ выбранного участка (двор, бульвар…), если на листе их несколько и участок выбран.
+        const mafZoneItems = () => (notesState.mafData?.items || []).filter(it => !notesState.maf.zone || it.z === notesState.maf.zone);
+        const mafZones = () => [...new Set((notesState.mafData?.items || []).map(it => it.z).filter(Boolean))];
         function mafSummary() {
             const st = notesState, inst = mafInstalled(), by = {};
-            (st.mafData?.items || []).forEach(it => {
+            mafZoneItems().forEach(it => {
                 const r = by[it.p] = by[it.p] || { mark: it.p, name: st.mafData.names[it.p] || '', total: 0, done: 0 };
                 r.total++; if (inst.has(it.id)) r.done++;
             });
-            return Object.values(by).map(r => ({ ...r, left: r.total - r.done }));
+            return Object.values(by).map(r => ({ ...r, left: r.total - r.done })).sort((a, b) => a.mark.localeCompare(b.mark, 'ru', { numeric: true }));
+        }
+        function mafSetZone(z) {
+            const st = notesState;
+            st.maf.zone = z; st.maf.focus = '';
+            // Приближаем план к выбранному участку.
+            const its = mafZoneItems();
+            if (z && its.length) {
+                const x0 = Math.min(...its.map(i => i.box[0])), x1 = Math.max(...its.map(i => i.box[1])), y0 = Math.min(...its.map(i => i.box[2])), y1 = Math.max(...its.map(i => i.box[3]));
+                const pad = 4, w = Math.max(x1 - x0 + 2 * pad, (y1 - y0 + 2 * pad) * st.baseVb[2] / st.baseVb[3]), h = w * st.baseVb[3] / st.baseVb[2];
+                st.vb = [(x0 + x1) / 2 - w / 2, (y0 + y1) / 2 - h / 2, w, h];
+            } else if (st.baseVb) st.vb = st.baseVb.slice();
+            notesRender();
         }
         function mafTotalsText() {
             const s = mafSummary(), total = s.reduce((a, r) => a + r.total, 0), done = s.reduce((a, r) => a + r.done, 0);
-            return `установлено ${done} из ${total}, осталось ${total - done}`;
+            return `${notesState.maf.zone ? notesState.maf.zone + ': ' : ''}установлено ${done} из ${total}, осталось ${total - done}`;
         }
         function mafTapAt(p) {
             const st = notesState, tol = 10 * notesUnitsPerPx();
@@ -10168,7 +10183,7 @@
             const st = notesState, inst = mafInstalled(), focus = st.maf.focus;
             return (st.mafData?.items || []).map(it => {
                 const [x0, x1, y0, y1] = it.box, done = inst.has(it.id), c = done ? '#16a34a' : '#f97316';
-                const op = focus && it.p !== focus ? ' opacity="0.25"' : '';
+                const op = (focus && it.p !== focus) || (st.maf.zone && it.z !== st.maf.zone) ? ' opacity="0.25"' : '';
                 const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, small = Math.max(x1 - x0, y1 - y0) / k < 14;
                 let body = small ? `<circle cx="${cx}" cy="${cy}" r="${7 * k}" fill="${c}" stroke="#fff" stroke-width="${1.5 * k}"/>` : '';
                 body += `<rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" fill="${c}" fill-opacity="0.55" stroke="${c}" stroke-width="${1.5 * k}"/>`;
@@ -10219,9 +10234,12 @@
             if (!show) { el.innerHTML = ''; return; }
             const sum = mafSummary(), total = sum.reduce((a, r) => a + r.total, 0), done = sum.reduce((a, r) => a + r.done, 0);
             const inst = mafInstalled(), pct = total ? Math.round(done / total * 100) : 0;
-            const focusItems = st.maf.focus ? st.mafData.items.filter(i => i.p === st.maf.focus) : [];
+            const focusItems = st.maf.focus ? mafZoneItems().filter(i => i.p === st.maf.focus) : [], zones = mafZones();
             el.innerHTML = `
                 <h3 class="text-base font-bold text-slate-800">Монтаж МАФ</h3>
+                ${zones.length > 1 ? `<select id="mafZone" onchange="mafSetZone(this.value)" class="mt-2 w-full h-9 border border-slate-300 rounded-lg px-2 text-sm bg-white">
+                    <option value="">Вся территория (${st.mafData.items.length} шт)</option>
+                    ${zones.map(z => `<option value="${escapeHtml(z)}" ${st.maf.zone === z ? 'selected' : ''}>${escapeHtml(z)} (${st.mafData.items.filter(i => i.z === z).length} шт)</option>`).join('')}</select>` : ''}
                 <div id="mafTotals" class="text-sm text-slate-600 mt-1">Установлено <b class="text-emerald-700">${done}</b> из <b>${total}</b> · осталось <b class="text-orange-600">${total - done}</b></div>
                 <div class="h-2 bg-slate-100 rounded-full mt-2 overflow-hidden"><div class="h-full bg-emerald-500" style="width:${pct}%"></div></div>
                 ${st.maf.error ? `<div class="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mt-2">${escapeHtml(st.maf.error)}</div>` : ''}
