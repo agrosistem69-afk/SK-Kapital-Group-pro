@@ -1698,6 +1698,117 @@ test('Нет связи с базой — кнопка «Войти» показ
     expect(await page.evaluate(() => !document.querySelector('#loginFormEl button[type="submit"]').disabled), 'кнопка «Войти» осталась заблокированной');
 });
 
+// Лист МАФ: две линии борта (y = 10 и y = 20 м), три МАФ с номерами, ведомость и список МАФ для отметок.
+function mafSheetHtml() {
+    const box = ([x0, x1, y0, y1]) => `M${x0} ${y0}L${x1} ${y0} ${x1} ${y1} ${x0} ${y1}z`;
+    const items = [{ id: 'А1', p: 'У-1', box: [5, 5.3, 11, 11.3] }, { id: 'А2', p: 'У-1', box: [10, 10.3, 11, 11.3] }, { id: 'А3', p: 'СК-1', box: [20, 22, 11, 11.6] }];
+    const plan = '<path class="st" data-s="ctx" stroke="#777" d="M0 10L40 10"/><path class="st" data-s="ctx" stroke="#777" d="M0 20L40 20"/>'
+        + items.map(i => `<g class="it" data-s="maf" data-p="${i.p}" data-id="${i.id}"><path class="mf" fill="#f97316" d="${box(i.box)}"/></g>`).join('');
+    const planz = require('zlib').gzipSync(Buffer.from(plan)).toString('base64');
+    const quants = [{ pos: 'У-1', name: 'Урна тестовая У-1', unit: 'шт', qty: 2, category: 'МАФ' }, { pos: 'СК-1', name: 'Скамья тестовая СК-1', unit: 'шт', qty: 1, category: 'МАФ' }];
+    return `<!doctype html><svg id="plan" viewBox="0 0 40 30"><g id="root"></g></svg>
+<script id="skkg-quantities" type="application/json">${JSON.stringify(quants)}</script>
+<script id="skkg-maf" type="application/json">${JSON.stringify({ items, names: { 'У-1': 'Урна', 'СК-1': 'Скамья' } })}</script>
+<script>const PLANZ="${planz}";</script>`;
+}
+async function openStage(page, html, btn) {
+    await page.evaluate(async h => {
+        __files['p1/test-sheet.html'] = h;
+        currentUserProfile = { id: 'u1', full_name: 'Грег' };
+        appData.drawings = __db.drawings.map(d => ({ ...d }));
+        await openDrawingViewer('d1');
+    }, html);
+    if (btn) {
+        await page.click(btn);
+        await page.waitForFunction(() => notesState?.vb && notesState.open, null, { timeout: 15000 });
+    }
+}
+async function stageTap(page, x, y) { const [sx, sy] = await notesToScreen(page, x, y); await page.mouse.click(sx, sy); }
+
+test('МАФ: отмечаю установленные на плане — видно факт и остаток, в «Объёмах» тоже', async () => {
+    const page = await openApp({ admin: true });
+    await openStage(page, mafSheetHtml());
+    expect(await page.$eval('#mafBtn', b => !b.classList.contains('hidden')), 'у листа с МАФ нет кнопки «МАФ»');
+    await page.click('#mafBtn');
+    await page.waitForFunction(() => notesState?.maf.loaded && document.querySelectorAll('#notesMarks [data-maf]').length === 3, null, { timeout: 15000 });
+    expect((await page.textContent('#mafTotals')).replace(/\s+/g, ' ').includes('Установлено 0 из 3 · осталось 3'), 'неверный итог до отметок: ' + await page.textContent('#mafTotals'));
+    // Урна А1 маленькая (30 см) — попадаем по кружку вокруг неё.
+    await stageTap(page, 5.15, 11.15);
+    await page.waitForFunction(() => __db.maf_installs.length === 1);
+    const row = await page.evaluate(() => __db.maf_installs[0]);
+    expect(row.item_id === 'А1' && row.mark === 'У-1' && row.project_id === 'p1' && row.sheet === 'лист 1 тестовый посадочный план' && row.installed_by_name === 'Грег', 'отметка сохранена неверно: ' + JSON.stringify(row));
+    expect((await page.textContent('#mafTotals')).replace(/\s+/g, ' ').includes('Установлено 1 из 3 · осталось 2'), 'итог не обновился: ' + await page.textContent('#mafTotals'));
+    const u1 = await page.$$eval('[data-maf-mark="У-1"] td', tds => tds.slice(1).map(td => td.textContent.trim()).join('/'));
+    expect(u1 === '2/1/1', 'по У-1 ожидалось проект 2 / уст. 1 / ост. 1, получено ' + u1);
+    expect(await page.$eval('#notesMarks [data-maf="А1"]', g => g.dataset.done) === '1', 'установленная урна не стала зелёной');
+    // Повторное касание снимает отметку (после подтверждения).
+    page.once('dialog', d => d.accept());
+    await stageTap(page, 5.15, 11.15);
+    await page.waitForFunction(() => __db.maf_installs.length === 0);
+    // Отмечаем скамью и урну — в «Объёмах» у материалов видно «Установлено».
+    await stageTap(page, 21, 11.3);
+    await stageTap(page, 10.15, 11.15);
+    await page.waitForFunction(() => __db.maf_installs.length === 2);
+    // По марке — список номеров, каждый можно показать на плане.
+    await page.click('[data-maf-mark="У-1"]');
+    expect((await page.textContent('#notesList')).includes('А2'), 'нет списка урн по номерам');
+    await page.click('#mafBtn');
+    await page.evaluate(() => closeDrawingViewer());
+    await page.evaluate(() => showVolumesScreen());
+    await importFromDrawings(page);
+    await page.waitForFunction(() => document.querySelectorAll('#volumesList [data-installed]').length === 2, null, { timeout: 15000 });
+    const cards = await page.$$eval('#volumesList button', bs => bs.map(b => b.innerText.replace(/\s+/g, ' ')));
+    const urn = cards.find(c => c.includes('Урна тестовая')), bench = cards.find(c => c.includes('Скамья тестовая'));
+    expect(urn && urn.includes('Установлено 1 из 2 · осталось установить 1'), 'в «Объёмах» у урны нет факта установки: ' + urn);
+    expect(bench && bench.includes('Установлено 1 из 1 · осталось установить 0'), 'в «Объёмах» у скамьи нет факта установки: ' + bench);
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
+test('МАФ: без прав ответственного отметку поставить нельзя; без таблицы — подсказка', async () => {
+    const page = await openApp({ admin: false });
+    await page.evaluate(() => { __missingTables.push('maf_installs'); });
+    await openStage(page, mafSheetHtml(), '#mafBtn');
+    await page.waitForFunction(() => notesState?.maf.loaded);
+    expect((await page.textContent('#notesList')).includes('maf_installs.sql'), 'нет подсказки про таблицу maf_installs');
+    let msg = '';
+    page.once('dialog', d => { msg = d.message(); d.dismiss(); });
+    await stageTap(page, 21, 11.3);
+    await page.waitForFunction(() => true);
+    expect(/ответственный за чертежи/.test(msg), 'нет предупреждения о правах: ' + msg);
+    expect(!(await page.evaluate(() => (__db.maf_installs || []).length)), 'отметка сохранилась без прав');
+});
+
+test('Замер: линейка показывает длину и прилипает к линиям чертежа', async () => {
+    const page = await openApp();
+    const marksText = async () => (await page.textContent('#notesMarks')).replace(/[\u00a0\u202f]/g, ' ');
+    await openStage(page, mafSheetHtml(), '#measureBtn');
+    // Протянули от линии y=10 до линии y=20, чуть мимо — концы прилипают к линиям: ровно 10 м.
+    const [ax, ay] = await notesToScreen(page, 30.03, 10.15), [bx, by] = await notesToScreen(page, 30, 19.88);
+    await page.mouse.move(ax, ay); await page.mouse.down(); await page.mouse.move((ax + bx) / 2, (ay + by) / 2); await page.mouse.move(bx, by); await page.mouse.up();
+    let m = await page.evaluate(() => notesState.measures.map(x => [x.a, x.b]));
+    expect(m.length === 1 && near(m[0][0][1], 10, 1e-6) && near(m[0][1][1], 20, 1e-6), 'концы не прилипли к линиям: ' + JSON.stringify(m));
+    expect((await page.textContent('#notesMarks')).includes('10,00 м'), 'нет подписи «10,00 м»: ' + await page.textContent('#notesMarks'));
+    // Две точки касанием: от линии до точки в 4,9 м от неё — в миллиметрах.
+    await stageTap(page, 35, 10.05);
+    await stageTap(page, 35, 14.9);
+    m = await page.evaluate(() => notesState.measures.length);
+    expect(m === 2 && (await marksText()).includes('4 900 мм'), 'замер двумя касаниями: ' + await marksText());
+    // Замеры не сохраняются в базу и стираются кнопкой.
+    expect(!(await page.evaluate(() => (__db.drawing_notes || []).length)), 'замер попал в замечания');
+    await page.click('#rulerClearBtn');
+    expect(await page.evaluate(() => notesState.measures.length) === 0, 'замеры не стёрлись');
+    // На листе-картинке масштаба нет: первый замер спрашивает длину, дальше линейка считает по ней.
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    await page.click('#measureBtn');
+    await openStage(page, `<!doctype html><img id="img" src="data:image/png;base64,${png}">`, '#measureBtn');
+    page.once('dialog', d => d.accept('5'));
+    const [cx, cy] = await notesToScreen(page, 0.1, 0.5), [dx, dy] = await notesToScreen(page, 0.6, 0.5);
+    await page.mouse.move(cx, cy); await page.mouse.down(); await page.mouse.move(dx, dy, { steps: 3 }); await page.mouse.up();
+    await page.waitForFunction(() => notesState.scale);
+    expect((await marksText()).includes('5 000 мм'), 'масштаб листа-картинки не применился: ' + await marksText());
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
 test('sb.php пересылает запросы в базу и не пускает в чужие адреса', async () => {
     const got = [];
     const upstream = http.createServer((req, res) => {
@@ -1744,7 +1855,7 @@ if (require.main === module) (async () => {
     baseUrl = `http://127.0.0.1:${server.address().port}`;
     browser = await chromium.launch();
     const results = [];
-    for (const t of tests) {
+    for (const t of tests.filter(t => !process.env.ONLY || t.name.includes(process.env.ONLY))) {
         const t0 = Date.now();
         let error = null;
         try { await t.fn(); } catch (e) { error = (e.message || String(e)).split('\n')[0]; }
