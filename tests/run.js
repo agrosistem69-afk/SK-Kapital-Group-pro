@@ -1705,7 +1705,7 @@ function mafSheetHtml() {
     const plan = '<path class="st" data-s="ctx" stroke="#777" d="M0 10L40 10"/><path class="st" data-s="ctx" stroke="#777" d="M0 20L40 20"/>'
         + items.map(i => `<g class="it" data-s="maf" data-p="${i.p}" data-id="${i.id}"><path class="mf" fill="#f97316" d="${box(i.box)}"/></g>`).join('');
     const planz = require('zlib').gzipSync(Buffer.from(plan)).toString('base64');
-    const quants = [{ pos: 'У-1', name: 'Урна тестовая У-1', unit: 'шт', qty: 2, category: 'МАФ' }, { pos: 'СК-1', name: 'Скамья тестовая СК-1', unit: 'шт', qty: 1, category: 'МАФ' }];
+    const quants = [{ pos: 'У-1', name: 'Урна тестовая У-1', unit: 'шт', qty: 2, category: 'МАФ', section: 'МАФ' }, { pos: 'СК-1', name: 'Скамья тестовая СК-1', unit: 'шт', qty: 1, category: 'МАФ', section: 'МАФ' }];
     return `<!doctype html><svg id="plan" viewBox="0 0 40 30"><g id="root"></g></svg>
 <script id="skkg-quantities" type="application/json">${JSON.stringify(quants)}</script>
 <script id="skkg-maf" type="application/json">${JSON.stringify({ items, names: { 'У-1': 'Урна', 'СК-1': 'Скамья' } })}</script>
@@ -1767,6 +1767,34 @@ test('МАФ: отмечаю установленные на плане — ви
     const urn = cards.find(c => c.includes('Урна тестовая')), bench = cards.find(c => c.includes('Скамья тестовая'));
     expect(urn && urn.includes('Установлено 1 из 2 · осталось установить 1'), 'в «Объёмах» у урны нет факта установки: ' + urn);
     expect(bench && bench.includes('Установлено 1 из 1 · осталось установить 0'), 'в «Объёмах» у скамьи нет факта установки: ' + bench);
+    expect(await page.$('#volumesList details[data-sec="МАФ"]'), 'в «Объёмах» нет папки «МАФ»');
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
+test('МАФ: отмечаю подряд несколько, реестр отмеченных, подсветка остатка, выгрузка в Excel', async () => {
+    const page = await openApp({ admin: true });
+    await openStage(page, mafSheetHtml());
+    await page.waitForFunction(() => document.querySelectorAll('#notesMarks [data-maf]').length === 3, null, { timeout: 15000 });
+    // Несколько касаний подряд — каждое отмечает свой МАФ, ничего не снимается.
+    await stageTap(page, 21, 11.3);
+    await stageTap(page, 5.15, 11.15);
+    await page.waitForFunction(() => __db.maf_installs.length === 2);
+    expect(await page.$$eval('#notesMarks [data-maf][data-done="1"]', g => g.map(x => x.dataset.maf).sort().join()) === 'А1,А3', 'отмечены не оба МАФ');
+    // Реестр: оба отмеченных, с датой и кто отметил.
+    await page.click('[data-maf-tab="reg"]');
+    const reg = await page.$$eval('#mafRegistry [data-maf-row]', r => r.map(x => x.dataset.mafRow + ':' + x.innerText.replace(/\s+/g, ' ')));
+    expect(reg.length === 2 && reg.every(r => r.includes('Грег')) && reg.some(r => r.startsWith('А3:') && r.includes('СК-1')), 'реестр неверный: ' + reg.join(' | '));
+    // Остаток: на плане установленные притушены, оставшийся мигает; во вкладке — только он.
+    await page.click('[data-maf-show="left"]');
+    expect(await page.$eval('#notesMarks [data-maf="А2"]', g => !!g.querySelector('.maf-pulse') && !g.getAttribute('opacity')), 'оставшийся МАФ не подсвечен');
+    expect(await page.$eval('#notesMarks [data-maf="А1"]', g => g.getAttribute('opacity') === '0.12' && !g.querySelector('.maf-pulse')), 'установленный не притушен');
+    expect(await page.$$eval('#mafRegistry [data-maf-row]', r => r.map(x => x.dataset.mafRow).join()) === 'А2', 'во вкладке «Остаток» не только А2');
+    // Реестр в Excel (CSV): все три МАФ со статусом.
+    await page.evaluate(() => { const c = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { window.__dlName = this.download; return c.call(this); }; });
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('text=Скачать реестр (Excel)')]);
+    const csv = require('fs').readFileSync(await dl.path(), 'utf8');
+    const dlName = await page.evaluate(() => window.__dlName);
+    expect(/^Реестр МАФ - Лист 1.*\.csv$/.test(dlName) && csv.split('\r\n').length === 4 && /"А3";"СК-1";"Скамья";"Двор";"установлен";"[\d.]+";"Грег"/.test(csv) && csv.includes('"А2";"У-1";"Урна";"Бульвар";"не установлен"'), 'CSV неверный: ' + dlName + ' ' + JSON.stringify(csv));
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 

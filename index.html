@@ -17,10 +17,10 @@
     </script>
 
     <!-- PWA -->
-    <link rel="manifest" href="manifest.json?v=56">
-    <link rel="icon" type="image/png" href="favicon.png?v=56">
+    <link rel="manifest" href="manifest.json?v=57">
+    <link rel="icon" type="image/png" href="favicon.png?v=57">
     <meta name="theme-color" content="#0b1730">
-    <link rel="apple-touch-icon" href="icons/icon-192.png?v=56">
+    <link rel="apple-touch-icon" href="icons/icon-192.png?v=57">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="SKKG Pro">
@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '56';
+        window.APP_VERSION = '57';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=56">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=56">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=56">
+    <link rel="stylesheet" href="vendor/app.css?v=57">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=57">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=57">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=56" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=56" defer></script>
-    <script src="vendor/jszip.min.js?v=56" defer></script>
+    <script src="vendor/html2canvas.min.js?v=57" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=57" defer></script>
+    <script src="vendor/jszip.min.js?v=57" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=56"></script>
+    <script src="vendor/supabase.js?v=57"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -1870,6 +1870,9 @@
         #notesSvg .ld .ln { stroke-width: .7px; }
         #notesSvg .hb { fill: #fff; fill-opacity: .75; stroke: none; }
         #notesSvg #notesPlan { pointer-events: none; }
+        #notesSvg.maf-mode #notesPlan [data-s="maf"] { display: none; }
+        #notesSvg .maf-pulse { animation: mafPulse 1.2s ease-in-out infinite; }
+        @keyframes mafPulse { 50% { opacity: .15; } }
         #zonesSvg { cursor: grab; }
         #zonesSvg.zones-picking { cursor: pointer; }
         #zonesSvg.zones-picking g.it[data-p]:not(.ld) path { pointer-events: all; }
@@ -7174,6 +7177,7 @@
         // Если у листа не указан раздел, подсказываем по группам ведомости.
         function guessSection(rows) {
             const cats = rows.map(r => r.category || '').join(' ');
+            if (rows.length && rows.every(r => /^МАФ$|малы[ех] архитектурн/i.test(r.category || ''))) return 'МАФ';
             if (/дерев|кустарн|газон|цветник|многолетн|лиан|травян|хвойн/i.test(cats)) return 'Озеленение';
             if (/покрыт|плитк|бортов|асфальт/i.test(cats)) return 'Покрытия';
             return '';
@@ -8966,7 +8970,7 @@
                         <li><b>По проекту</b> — сколько нужно по последней редакции чертежей.</li>
                         <li><b>Поставлено</b> — сколько уже привезли по документам (из 1С или внесено вручную).</li>
                         <li><b>Осталось</b> — сколько ещё нужно поставить. Если привезли больше проекта, вместо него будет красное «Сверх проекта».</li>
-                        <li><b>Установлено</b> (у МАФ) — сколько скамей, урн, велопарковок отмечено на чертеже как установленные: откройте лист с МАФ в «Чертежах» и нажмите «МАФ».</li>
+                        <li><b>Установлено</b> (у МАФ) — сколько скамей, урн, велопарковок отмечено на чертеже как установленные: откройте лист с МАФ в «Чертежах» — он сразу открывается в режиме отметок. Нажимайте на МАФ по очереди; «Остаток» подсвечивает, что ещё не установлено, вкладка «Реестр» — список отмеченных, «Скачать реестр (Excel)» — таблица. МАФ лежат в папке «МАФ».</li>
                     </ul>
                     ${helpH('Кнопки')}
                     <div class="space-y-3">
@@ -9417,7 +9421,7 @@
             notesState = drawing ? { drawing, projectId: drawing.project_id, sheet: normName(drawing.sheet), html: null, plan: null, vb: null, baseVb: null,
                 tool: 'pan', color: NOTE_COLORS[0], font: 'm', marks: [], draft: null, selected: null, open: false, error: '', author: '',
                 set: null, newSets: [], mode: 'notes', measures: [], rulerA: null, mdraft: null, snap: null, scale: null,
-                mafData: null, maf: { loaded: false, installs: [], error: '', tool: 'mark', focus: '', zone: '' } } : null;
+                mafData: null, maf: { loaded: false, installs: [], error: '', tool: 'mark', focus: '', zone: '', show: 'all', tab: 'marks' } } : null;
             document.getElementById('notesStage').classList.add('hidden');
             document.getElementById('notesStage').classList.remove('flex');
             document.getElementById('drawingViewerFrame').classList.remove('hidden');
@@ -9728,6 +9732,7 @@
             if (!st) return;
             const svg = document.getElementById('notesSvg');
             svg.style.cursor = st.mode === 'notes' ? (st.tool === 'pan' ? 'grab' : 'crosshair') : stageRulerOn() ? 'crosshair' : 'pointer';
+            svg.classList.toggle('maf-mode', st.mode === 'maf');   // свои рамки МАФ из листа прячем — их рисуют отметки
             notesRenderSets();
             if (st.mode !== 'notes') { stageRender(); return; }
             document.getElementById('notesZoomBtns').classList.toggle('hidden', st.set === null);
@@ -10174,6 +10179,24 @@
             else if (data?.[0]) Object.assign(tmp, data[0]);
             notesRender();
         }
+        function mafSetShow(v) { notesState.maf.show = v; notesState.maf.tab = v === 'left' ? 'left' : v === 'done' ? 'reg' : notesState.maf.tab; notesRender(); }
+        function mafSetTab(t) { notesState.maf.tab = t; mafRenderList(); }
+        // Реестр для Excel: все МАФ листа (с учётом выбранного участка) — номер, марка, статус, дата, кто отметил.
+        function mafExportCsv() {
+            const st = notesState, inst = mafInstalled();
+            const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+            const rows = [['№ на плане', 'Марка', 'Наименование', 'Участок', 'Статус', 'Дата установки', 'Отметил']];
+            mafZoneItems().slice().sort((a, b) => a.p.localeCompare(b.p, 'ru', { numeric: true }) || a.id.localeCompare(b.id, 'ru', { numeric: true })).forEach(it => {
+                const r = inst.get(it.id);
+                rows.push([it.id, it.p, st.mafData.names[it.p] || '', it.z, r ? 'установлен' : 'не установлен', r ? new Date(r.installed_at).toLocaleDateString('ru-RU') : '', r?.installed_by_name || '']);
+            });
+            const blob = new Blob(['\ufeff' + rows.map(r => r.map(q).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `Реестр МАФ - ${(st.drawing?.sheet || 'лист').replace(/[\\/:*?"<>|]/g, ' ')}.csv`;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        }
         function mafSetTool(t) { notesState.maf.tool = t; notesState.rulerA = null; notesRender(); }
         function mafFocus(mark) { const st = notesState; st.maf.focus = st.maf.focus === mark ? '' : mark; notesRender(); }
         function mafZoomTo(id) {
@@ -10187,9 +10210,13 @@
             const st = notesState, inst = mafInstalled(), focus = st.maf.focus;
             return (st.mafData?.items || []).map(it => {
                 const [x0, x1, y0, y1] = it.box, done = inst.has(it.id), c = done ? '#16a34a' : '#f97316';
-                const op = (focus && it.p !== focus) || (st.maf.zone && it.z !== st.maf.zone) ? ' opacity="0.25"' : '';
+                // «Остаток»: установленные почти прячем, оставшиеся мигают; «Установлено» — наоборот.
+                const off = (focus && it.p !== focus) || (st.maf.zone && it.z !== st.maf.zone);
+                const hide = (st.maf.show === 'left' && done) || (st.maf.show === 'done' && !done);
+                const op = hide ? ' opacity="0.12"' : off ? ' opacity="0.25"' : '';
                 const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, small = Math.max(x1 - x0, y1 - y0) / k < 14;
-                let body = small ? `<circle cx="${cx}" cy="${cy}" r="${7 * k}" fill="${c}" stroke="#fff" stroke-width="${1.5 * k}"/>` : '';
+                let body = st.maf.show === 'left' && !done && !off ? `<circle class="maf-pulse" cx="${cx}" cy="${cy}" r="${Math.max(13 * k, Math.hypot(x1 - x0, y1 - y0) / 2 + 5 * k)}" fill="none" stroke="#ea580c" stroke-width="${3 * k}"/>` : '';
+                body += small ? `<circle cx="${cx}" cy="${cy}" r="${7 * k}" fill="${c}" stroke="#fff" stroke-width="${1.5 * k}"/>` : '';
                 body += `<rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" fill="${c}" fill-opacity="0.55" stroke="${c}" stroke-width="${1.5 * k}"/>`;
                 if (done && !small) body += `<path d="M${cx - 4 * k},${cy}l${3 * k},${3 * k}l${6 * k},${-6 * k}" fill="none" stroke="#fff" stroke-width="${2 * k}"/>`;
                 // Номер и марка — когда план приближен настолько, что подписи не слипаются.
@@ -10225,7 +10252,8 @@
                 bar = `<span class="text-xs text-slate-500 px-1 flex-shrink-0">Протяните линию или нажмите две точки. Точки прилипают к линиям чертежа.</span>${clear ? sep + clear : ''}${units}${exp}`;
             } else {
                 bar = `${btn(st.maf.tool === 'mark', 'data-stage-tool="mark" onclick="mafSetTool(\'mark\')"', 'fa-hand-pointer', 'Отметить', 'Нажмите на МАФ — отметка «установлено»')}
-                    ${btn(st.maf.tool === 'ruler', 'data-stage-tool="ruler" onclick="mafSetTool(\'ruler\')"', 'fa-ruler', 'Линейка', 'Измерить расстояние на плане')}${clear ? sep + clear : ''}${exp}`;
+                    ${btn(st.maf.tool === 'ruler', 'data-stage-tool="ruler" onclick="mafSetTool(\'ruler\')"', 'fa-ruler', 'Линейка', 'Измерить расстояние на плане')}${sep}
+                    ${[['all', 'Все'], ['left', 'Остаток'], ['done', 'Установлено']].map(([v, l]) => btn(st.maf.show === v, `data-maf-show="${v}" onclick="mafSetShow('${v}')"`, v === 'left' ? 'fa-circle-exclamation' : v === 'done' ? 'fa-circle-check' : 'fa-layer-group', l, v === 'left' ? 'Подсветить, что ещё не установлено' : v === 'done' ? 'Показать только установленные' : 'Показать все МАФ')).join('')}${clear ? sep + clear : ''}${exp}`;
             }
             document.getElementById('notesToolbar').innerHTML = bar;
             if (st.vb) notesApplyViewBox();
@@ -10239,6 +10267,19 @@
             const sum = mafSummary(), total = sum.reduce((a, r) => a + r.total, 0), done = sum.reduce((a, r) => a + r.done, 0);
             const inst = mafInstalled(), pct = total ? Math.round(done / total * 100) : 0;
             const focusItems = st.maf.focus ? mafZoneItems().filter(i => i.p === st.maf.focus) : [], zones = mafZones();
+            // Вкладки: по маркам (проект / установлено / осталось), реестр установленных, остаток по номерам.
+            const tab = st.maf.tab || 'marks', zi = mafZoneItems(), byId = new Map(zi.map(i => [i.id, i]));
+            const regList = st.maf.installs.filter(r => byId.has(r.item_id)).sort((a, b) => (b.installed_at || '').localeCompare(a.installed_at || ''));
+            const leftList = zi.filter(i => !inst.has(i.id)).sort((a, b) => a.p.localeCompare(b.p, 'ru', { numeric: true }) || a.id.localeCompare(b.id, 'ru', { numeric: true }));
+            const tabs = [['marks', 'По маркам'], ['reg', `Реестр ${regList.length}`], ['left', `Остаток ${leftList.length}`]];
+            const list = tab === 'reg' ? regList : leftList;
+            const regRow = x => {
+                const it = tab === 'reg' ? byId.get(x.item_id) : x, r = tab === 'reg' ? x : null;
+                return `<button data-maf-row="${escapeHtml(it.id)}" onclick="mafZoomTo('${escapeHtml(it.id)}')" class="w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 hover:bg-slate-50">
+                    <i class="fa-solid ${r ? 'fa-circle-check text-emerald-600' : 'fa-circle text-orange-400'}"></i><b class="w-12 flex-shrink-0">${escapeHtml(it.id)}</b>
+                    <span class="flex-1 min-w-0"><span class="font-semibold text-slate-700">${escapeHtml(it.p)}</span> <span class="text-xs text-slate-500">${escapeHtml(st.mafData.names[it.p] || '')}</span>
+                    <span class="block text-[11px] text-slate-400 truncate">${r ? new Date(r.installed_at).toLocaleDateString('ru-RU') + (r.installed_by_name ? ' · ' + escapeHtml(r.installed_by_name) : '') : escapeHtml(it.z || '')}</span></span></button>`;
+            };
             el.innerHTML = `
                 <h3 class="text-base font-bold text-slate-800">Монтаж МАФ</h3>
                 ${zones.length > 1 ? `<select id="mafZone" onchange="mafSetZone(this.value)" class="mt-2 w-full h-9 border border-slate-300 rounded-lg px-2 text-sm bg-white">
@@ -10247,15 +10288,17 @@
                 <div id="mafTotals" class="text-sm text-slate-600 mt-1">Установлено <b class="text-emerald-700">${done}</b> из <b>${total}</b> · осталось <b class="text-orange-600">${total - done}</b></div>
                 <div class="h-2 bg-slate-100 rounded-full mt-2 overflow-hidden"><div class="h-full bg-emerald-500" style="width:${pct}%"></div></div>
                 ${st.maf.error ? `<div class="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mt-2">${escapeHtml(st.maf.error)}</div>` : ''}
-                <p class="text-xs text-slate-500 mt-2">${mafCanEdit() ? 'Нажмите на МАФ на плане: <span class="text-orange-600 font-semibold">оранжевый</span> — ещё не установлен, <span class="text-emerald-700 font-semibold">зелёный</span> — установлен. Повторное нажатие снимает отметку.' : 'Оранжевый — ещё не установлен, зелёный — установлен. Отметки ставит ответственный за чертежи.'}</p>
-                <table class="w-full text-sm mt-3"><thead><tr class="text-[11px] text-slate-400 uppercase"><th class="text-left font-semibold py-1">Марка</th><th class="font-semibold">Проект</th><th class="font-semibold">Уст.</th><th class="font-semibold">Ост.</th></tr></thead>
+                <p class="text-xs text-slate-500 mt-2">${mafCanEdit() ? 'Нажимайте на МАФ на плане по очереди — сколько нужно, каждый отмечается отдельно: <span class="text-orange-600 font-semibold">оранжевый</span> — ещё не установлен, <span class="text-emerald-700 font-semibold">зелёный</span> — установлен. Повторное нажатие снимает отметку.' : 'Оранжевый — ещё не установлен, зелёный — установлен. Отметки ставит ответственный за чертежи.'}</p>
+                <div class="flex gap-1 mt-3 p-1 bg-slate-100 rounded-lg text-xs font-semibold">${tabs.map(([t, l]) => `<button data-maf-tab="${t}" onclick="mafSetTab('${t}')" class="flex-1 h-8 rounded-md ${tab === t ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}">${l}</button>`).join('')}</div>
+                ${tab === 'marks' ? `<table class="w-full text-sm mt-3"><thead><tr class="text-[11px] text-slate-400 uppercase"><th class="text-left font-semibold py-1">Марка</th><th class="font-semibold">Проект</th><th class="font-semibold">Уст.</th><th class="font-semibold">Ост.</th></tr></thead>
                 <tbody>${sum.map(r => `<tr data-maf-mark="${escapeHtml(r.mark)}" onclick="mafFocus(this.dataset.mafMark)" class="cursor-pointer border-t border-slate-100 ${st.maf.focus === r.mark ? 'bg-brand-50' : 'hover:bg-slate-50'}">
                     <td class="py-1.5"><div class="font-semibold text-slate-800">${escapeHtml(r.mark)}</div><div class="text-[11px] text-slate-500 leading-tight">${escapeHtml(r.name)}</div></td>
                     <td class="text-center">${r.total}</td><td class="text-center font-semibold text-emerald-700">${r.done}</td><td class="text-center font-semibold ${r.left ? 'text-orange-600' : 'text-slate-400'}">${r.left}</td></tr>`).join('')}</tbody></table>
-                ${focusItems.length ? `<div class="mt-3 text-xs font-bold text-slate-400 uppercase">${escapeHtml(st.maf.focus)}: по номерам</div>
+${focusItems.length ? `<div class="mt-3 text-xs font-bold text-slate-400 uppercase">${escapeHtml(st.maf.focus)}: по номерам</div>
                 <div class="mt-1 divide-y divide-slate-100 border border-slate-200 rounded-lg">${focusItems.map(it => { const r = inst.get(it.id); return `<button onclick="mafZoomTo('${escapeHtml(it.id)}')" class="w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 hover:bg-slate-50">
                     <i class="fa-solid ${r ? 'fa-circle-check text-emerald-600' : 'fa-circle text-orange-400'}"></i><b class="w-12">${escapeHtml(it.id)}</b>
-                    <span class="flex-1 text-xs text-slate-500 truncate">${r ? 'установлен ' + new Date(r.installed_at).toLocaleDateString('ru-RU') + (r.installed_by_name ? ' · ' + escapeHtml(r.installed_by_name) : '') : 'не установлен'}</span></button>`; }).join('')}</div>` : ''}`;
+                    <span class="flex-1 text-xs text-slate-500 truncate">${r ? 'установлен ' + new Date(r.installed_at).toLocaleDateString('ru-RU') + (r.installed_by_name ? ' · ' + escapeHtml(r.installed_by_name) : '') : 'не установлен'}</span></button>`; }).join('')}</div>` : ''}` : `<div id="mafRegistry" class="mt-2 divide-y divide-slate-100 border border-slate-200 rounded-lg">${list.length ? list.map(regRow).join('') : `<div class="px-3 py-3 text-sm text-slate-400">${tab === 'reg' ? 'Пока ничего не отмечено.' : 'Всё установлено.'}</div>`}</div>`}
+                <button onclick="mafExportCsv()" class="mt-3 w-full h-9 rounded-lg border border-slate-300 text-sm font-semibold text-slate-700 hover:bg-slate-50"><i class="fa-solid fa-file-excel mr-1 text-emerald-600"></i>Скачать реестр (Excel)</button>`;
         }
 
         // ---- картинкой (JPEG): видимая часть листа, обрезанная по самому чертежу и пометкам, в высоком разрешении ----
