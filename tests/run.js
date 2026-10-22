@@ -1712,14 +1712,14 @@ function mafSheetHtml() {
 <script>const PLANZ="${planz}";</script>`;
 }
 async function openStage(page, html, btn) {
-    await page.evaluate(async h => {
+    await page.evaluate(async ([h, maf]) => {
         __files['p1/test-sheet.html'] = h;
         currentUserProfile = { id: 'u1', full_name: 'Грег' };
         appData.drawings = __db.drawings.map(d => ({ ...d }));
-        await openDrawingViewer('d1');
-    }, html);
-    // Лист с МАФ сам открывается в режиме «МАФ» — дожидаемся, пока план и отметки загрузятся.
-    await page.waitForFunction(() => !notesState?.mafData || (notesState.open && notesState.vb && notesState.maf.loaded), null, { timeout: 15000 });
+        await openDrawingViewer('d1', { maf });
+    }, [html, !btn]);
+    // Без кнопки — открываем как из «Объёмов», сразу в режиме «МАФ»; дожидаемся, пока план и отметки загрузятся.
+    await page.waitForFunction(maf => notesState?.html != null && (!maf || !notesState.mafData || (notesState.open && notesState.vb && notesState.maf.loaded)), !btn, { timeout: 15000 });
     if (btn) {
         await page.click(btn);
         await page.waitForFunction(() => notesState?.vb && notesState.open, null, { timeout: 15000 });
@@ -1768,6 +1768,15 @@ test('МАФ: отмечаю установленные на плане — ви
     expect(urn && urn.includes('Установлено 1 из 2 · осталось установить 1'), 'в «Объёмах» у урны нет факта установки: ' + urn);
     expect(bench && bench.includes('Установлено 1 из 1 · осталось установить 0'), 'в «Объёмах» у скамьи нет факта установки: ' + bench);
     expect(await page.$('#volumesList details[data-sec="МАФ"]'), 'в «Объёмах» нет папки «МАФ»');
+    // Из папки «МАФ» план открывается сразу в режиме отметок.
+    await page.click('#volumesList [data-maf-open="d1"]');
+    await page.waitForFunction(() => notesState?.open && notesState.mode === 'maf' && notesState.maf.loaded && document.querySelectorAll('#notesMarks [data-maf][data-done="1"]').length === 2, null, { timeout: 15000 });
+    // А из «Чертежей» тот же лист — обычный просмотр, без кнопки «МАФ».
+    await page.evaluate(() => closeDrawingViewer());
+    await page.evaluate(() => openDrawingViewer('d1'));
+    await page.waitForFunction(() => notesState?.mafData);
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => !notesState.open && document.getElementById('mafBtn').classList.contains('hidden')), 'из «Чертежей» лист открылся в режиме МАФ');
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
@@ -1822,13 +1831,32 @@ test('Замер: линейка показывает длину и прилип
     let m = await page.evaluate(() => notesState.measures.map(x => [x.a, x.b]));
     expect(m.length === 1 && near(m[0][0][1], 10, 1e-6) && near(m[0][1][1], 20, 1e-6), 'концы не прилипли к линиям: ' + JSON.stringify(m));
     expect((await page.textContent('#notesMarks')).includes('10,00 м'), 'нет подписи «10,00 м»: ' + await page.textContent('#notesMarks'));
-    // Две точки касанием: от линии до точки в 4,9 м от неё — в миллиметрах.
+    // Касания мимо линейки новую линию не рисуют — план просто двигается.
+    await stageTap(page, 35, 10.05);
+    await stageTap(page, 35, 14.9);
+    expect(await page.evaluate(() => notesState.measures.length) === 1, 'касание без «Новый замер» нарисовало линию');
+    // Тянем нижний конец (кружок) вправо — линейка поворачивается и меняет длину; конец прилипает к линии y=20.
+    const drag = async (from, to) => { const [fx, fy] = await notesToScreen(page, ...from), [tx, ty] = await notesToScreen(page, ...to); await page.mouse.move(fx, fy); await page.mouse.down(); await page.mouse.move((fx + tx) / 2, (fy + ty) / 2); await page.mouse.move(tx, ty); await page.mouse.up(); };
+    await drag([30, 20], [37.5, 19.9]);
+    m = await page.evaluate(() => notesState.measures);
+    expect(m.length === 1 && near(m[0].b[0], 37.5, 0.2) && near(m[0].b[1], 20, 1e-6) && near(m[0].a[1], 10, 1e-6), 'конец линейки не перетащился: ' + JSON.stringify(m));
+    expect(/12,4\d м/.test(await marksText()), 'длина после поворота не ~12,5 м: ' + JSON.stringify(await marksText()));
+    // Тянем за середину — линейка переносится целиком, длина та же.
+    await drag([33.75, 15], [28.75, 15]);
+    m = await page.evaluate(() => notesState.measures);
+    expect(m.length === 1 && near(m[0].a[0], 25, 0.2) && near(m[0].b[0], 32.5, 0.3) && /12,4\d м/.test(await marksText()), 'линейка не перенеслась: ' + JSON.stringify(m));
+    // «Новый замер» — две точки касанием: от линии до точки в 4,9 м от неё — в миллиметрах.
+    await page.click('#rulerNewBtn');
     await stageTap(page, 35, 10.05);
     await stageTap(page, 35, 14.9);
     m = await page.evaluate(() => notesState.measures.length);
     expect(m === 2 && (await marksText()).includes('4 900 мм'), 'замер двумя касаниями: ' + await marksText());
     // Замеры не сохраняются в базу и стираются кнопкой.
     expect(!(await page.evaluate(() => (__db.drawing_notes || []).length)), 'замер попал в замечания');
+    // Выбранную линейку можно удалить по одной.
+    await stageTap(page, 35, 12.5);
+    await page.click('#rulerDelBtn');
+    expect(await page.evaluate(() => notesState.measures.length) === 1, 'выбранный замер не удалился');
     await page.click('#rulerClearBtn');
     expect(await page.evaluate(() => notesState.measures.length) === 0, 'замеры не стёрлись');
     // На листе-картинке масштаба нет: первый замер спрашивает длину, дальше линейка считает по ней.

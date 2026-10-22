@@ -17,10 +17,10 @@
     </script>
 
     <!-- PWA -->
-    <link rel="manifest" href="manifest.json?v=57">
-    <link rel="icon" type="image/png" href="favicon.png?v=57">
+    <link rel="manifest" href="manifest.json?v=58">
+    <link rel="icon" type="image/png" href="favicon.png?v=58">
     <meta name="theme-color" content="#0b1730">
-    <link rel="apple-touch-icon" href="icons/icon-192.png?v=57">
+    <link rel="apple-touch-icon" href="icons/icon-192.png?v=58">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="SKKG Pro">
@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '57';
+        window.APP_VERSION = '58';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=57">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=57">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=57">
+    <link rel="stylesheet" href="vendor/app.css?v=58">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=58">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=58">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=57" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=57" defer></script>
-    <script src="vendor/jszip.min.js?v=57" defer></script>
+    <script src="vendor/html2canvas.min.js?v=58" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=58" defer></script>
+    <script src="vendor/jszip.min.js?v=58" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=57"></script>
+    <script src="vendor/supabase.js?v=58"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -6611,6 +6611,7 @@
                 const byCat = {};
                 list.forEach(m => { const k = m.category || ''; (byCat[k] = byCat[k] || []).push(m); });
                 const catOrder = Object.keys(byCat).sort((a, b) => !a ? 1 : !b ? -1 : a.localeCompare(b, 'ru'));
+                const mafDrawing = volumesMafDrawing(list);
                 return `
                 <details class="volumes-section bg-slate-100/60 rounded-xl" data-sec="${escapeHtml(sec)}" ${sectionNames.length === 1 || volumesOpenSections.has(sec) ? 'open' : ''} ontoggle="volumesOpenSections[this.open ? 'add' : 'delete'](this.dataset.sec)">
                     <summary class="px-4 py-3 cursor-pointer flex items-center gap-3">
@@ -6619,6 +6620,7 @@
                         <span class="text-xs text-slate-500">${list.length} мат.${done ? ` · поставлено полностью ${done}` : ''}</span>
                     </summary>
                     <div class="px-2 pb-2 space-y-2">
+                        ${mafDrawing ? `<button data-maf-open="${escapeHtml(mafDrawing.id)}" onclick="openDrawingViewer(this.dataset.mafOpen, { maf: true })" class="w-full h-11 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold flex items-center justify-center gap-2"><i class="fa-solid fa-chair"></i>Отметить установку на плане</button>` : ''}
                         ${catOrder.map(cat => `
                             ${cat ? `<div class="text-[11px] font-bold text-slate-400 uppercase tracking-wide px-2 pt-2">${escapeHtml(cat)}</div>` : ''}
                             ${byCat[cat].map(materialCard).join('')}`).join('')}
@@ -7185,6 +7187,13 @@
 
         // Штуки — целые, площади и объёмы — до десятых.
         const roundQty = (n, unit) => /шт|компл/i.test(unit || '') ? Math.round(n) : Math.round(n * 10) / 10;
+
+        // Лист с планом МАФ для материалов раздела: отметки «установлено» ставятся на нём.
+        function volumesMafDrawing(list) {
+            const sheets = new Set(list.filter(m => /МАФ/i.test(`${m.category || ''} ${m.section || ''}`) && m.drawing_ref).map(m => normName(m.drawing_ref.split('#')[0])));
+            if (!sheets.size) return null;
+            return latestDrawingsBySheet((appData.drawings || []).filter(d => d.project_id === volumesState.projectId)).find(d => sheets.has(normName(d.sheet))) || null;
+        }
 
         function buildDrawingItems(sheets) {
             const items = [];
@@ -8970,7 +8979,7 @@
                         <li><b>По проекту</b> — сколько нужно по последней редакции чертежей.</li>
                         <li><b>Поставлено</b> — сколько уже привезли по документам (из 1С или внесено вручную).</li>
                         <li><b>Осталось</b> — сколько ещё нужно поставить. Если привезли больше проекта, вместо него будет красное «Сверх проекта».</li>
-                        <li><b>Установлено</b> (у МАФ) — сколько скамей, урн, велопарковок отмечено на чертеже как установленные: откройте лист с МАФ в «Чертежах» — он сразу открывается в режиме отметок. Нажимайте на МАФ по очереди; «Остаток» подсвечивает, что ещё не установлено, вкладка «Реестр» — список отмеченных, «Скачать реестр (Excel)» — таблица. МАФ лежат в папке «МАФ».</li>
+                        <li><b>Установлено</b> (у МАФ) — сколько скамей, урн, велопарковок отмечено на чертеже как установленные: в папке «МАФ» нажмите «Отметить установку на плане». Нажимайте на МАФ по очереди; «Остаток» подсвечивает, что ещё не установлено, вкладка «Реестр» — список отмеченных, «Скачать реестр (Excel)» — таблица. МАФ лежат в папке «МАФ».</li>
                     </ul>
                     ${helpH('Кнопки')}
                     <div class="space-y-3">
@@ -9360,7 +9369,8 @@
             return d.toLocaleDateString('ru-RU') + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
         }
 
-        async function openDrawingViewer(drawingId) {
+        // opts.maf — открыть сразу в режиме отметок МАФ (из «Объёмов»). Из «Чертежей» лист открывается обычным просмотром.
+        async function openDrawingViewer(drawingId, opts = {}) {
             const d = (appData.drawings || []).find(x => x.id === drawingId);
             if (!d) return;
             const frame = document.getElementById('drawingViewerFrame');
@@ -9385,10 +9395,9 @@
             if (notesState?.drawing === d) {
                 notesState.html = html;
                 notesState.mafData = parseMafItems(html);
-                const mafBtn = document.getElementById('mafBtn');
-                mafBtn.classList.toggle('hidden', !notesState.mafData); mafBtn.classList.toggle('flex', !!notesState.mafData);
-                // Лист с МАФ сразу открывается в режиме отметок: на нём ради этого и работают.
-                if (notesState.mafData && !notesState.open) drawingStage('maf');
+                const maf = !!(opts.maf && notesState.mafData), mafBtn = document.getElementById('mafBtn');
+                mafBtn.classList.toggle('hidden', !maf); mafBtn.classList.toggle('flex', maf);
+                if (maf && !notesState.open) drawingStage('maf');
             }
             if (drawingViewerUrl) URL.revokeObjectURL(drawingViewerUrl);
             drawingViewerUrl = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
@@ -9421,7 +9430,7 @@
             notesState = drawing ? { drawing, projectId: drawing.project_id, sheet: normName(drawing.sheet), html: null, plan: null, vb: null, baseVb: null,
                 tool: 'pan', color: NOTE_COLORS[0], font: 'm', marks: [], draft: null, selected: null, open: false, error: '', author: '',
                 set: null, newSets: [], mode: 'notes', measures: [], rulerA: null, mdraft: null, snap: null, scale: null,
-                mafData: null, maf: { loaded: false, installs: [], error: '', tool: 'mark', focus: '', zone: '', show: 'all', tab: 'marks' } } : null;
+                mafData: null, maf: { loaded: false, installs: [], error: '', tool: 'mark', focus: '', zone: '', show: 'all', tab: 'marks' }, marmed: false, msel: null } : null;
             document.getElementById('notesStage').classList.add('hidden');
             document.getElementById('notesStage').classList.remove('flex');
             document.getElementById('drawingViewerFrame').classList.remove('hidden');
@@ -9545,7 +9554,8 @@
             if (!st) return;
             const stage = document.getElementById('notesStage');
             st.open = !(st.open && st.mode === mode);
-            st.mode = mode; st.selected = null; st.draft = null; st.mdraft = null; st.rulerA = null;
+            st.mode = mode; st.selected = null; st.draft = null; st.mdraft = null; st.rulerA = null; st.msel = null;
+            st.marmed = mode === 'measure' && !st.measures.length;   // пустой замер — сразу можно провести линию
             stage.classList.toggle('hidden', !st.open);
             stage.classList.toggle('flex', st.open);
             document.getElementById('drawingViewerFrame').classList.toggle('hidden', st.open);
@@ -9888,7 +9898,11 @@
                 }
                 const p = notesToPlan(e.clientX, e.clientY);
                 if (st.mode !== 'notes') {
-                    if (stageRulerOn()) { const a = rulerSnap(p); g = { type: 'measure', a, startPx: [e.clientX, e.clientY], moved: false }; st.mdraft = { a, b: a, live: true }; }
+                    // Линейка: за кружок на конце — длина и поворот, за саму линию — перенос.
+                    // Новая линия рисуется только после «Новый замер»; в остальное время план просто двигается.
+                    const hit = stageRulerOn() && rulerHit(p);
+                    if (hit) { const m = st.measures[hit.i]; g = { type: 'medit', i: hit.i, end: hit.end, start: p, orig: { a: m.a.slice(), b: m.b.slice() }, startPx: [e.clientX, e.clientY], moved: false }; }
+                    else if (stageRulerOn() && st.marmed) { const a = rulerSnap(p); g = { type: 'measure', a, startPx: [e.clientX, e.clientY], moved: false }; st.mdraft = { a, b: a, live: true }; }
                     else g = { type: 'pan', start: [e.clientX, e.clientY], vb: st.vb.slice(), moved: false };
                     return;
                 }
@@ -9923,6 +9937,14 @@
                     const p = notesToPlan(e.clientX, e.clientY);
                     g.mark.data = g.type === 'move' ? noteMoved(g.orig, p[0] - g.start[0], p[1] - g.start[1]) : noteResized(g.orig, g.box, g.handle, p);
                     notesRenderMarks();
+                } else if (g.type === 'medit') {
+                    if (!g.moved && Math.hypot(e.clientX - g.startPx[0], e.clientY - g.startPx[1]) < 4) return;
+                    g.moved = true;
+                    const p = notesToPlan(e.clientX, e.clientY), m = st.measures[g.i];
+                    if (g.end) m[g.end] = rulerSnap(p);
+                    else { const dx = p[0] - g.start[0], dy = p[1] - g.start[1]; m.a = [g.orig.a[0] + dx, g.orig.a[1] + dy]; m.b = [g.orig.b[0] + dx, g.orig.b[1] + dy]; }
+                    st.msel = g.i;
+                    notesRenderMarks();
                 } else if (g.type === 'measure') {
                     if (!g.moved && Math.hypot(e.clientX - g.startPx[0], e.clientY - g.startPx[1]) < 6) return;
                     g.moved = true;
@@ -9941,7 +9963,11 @@
                 if (!pointers.has(e.pointerId)) return;
                 pointers.delete(e.pointerId);
                 const done = e.type === 'pointerup';
-                if (g?.type === 'measure' && pointers.size === 0) {
+                if (g?.type === 'medit' && pointers.size === 0) {
+                    if (!done && g.moved) Object.assign(st.measures[g.i], { a: g.orig.a, b: g.orig.b });
+                    st.msel = g.i;
+                    notesRender();
+                } else if (g?.type === 'measure' && pointers.size === 0) {
                     st.mdraft = null;
                     if (done && g.moved) rulerAdd(g.a, rulerSnap(notesToPlan(e.clientX, e.clientY)));
                     else if (done) {
@@ -9967,8 +9993,8 @@
                     else if (g.moved) { g.mark.data = g.orig.data; notesRenderMarks(); }
                     else if (done && g.type === 'move') notesPickAt(e);
                 } else if (g?.type === 'pan' && !g.moved && done && pointers.size === 0) {
-                    if (st.mode === 'maf') mafTapAt(notesToPlan(e.clientX, e.clientY));
-                    else if (st.mode !== 'notes') { /* в замере касание обрабатывает линейка */ }
+                    if (st.mode === 'maf' && st.maf.tool === 'mark') mafTapAt(notesToPlan(e.clientX, e.clientY));
+                    else if (st.mode !== 'notes') { if (st.msel != null) { st.msel = null; notesRender(); } }   // касание мимо линейки — снять выбор, ничего не рисуя
                     else if (st.tool === 'text') notesAddText(e); else notesPickAt(e);
                 }
                 if (pointers.size === 0) g = null;
@@ -10036,6 +10062,7 @@
             if (rulerLenUnits(a, b) <= 0) { notesRenderMarks(); return; }
             st.measures.push({ a: [a[0], a[1]], b: [b[0], b[1]] });
             if (st.measures.length > 30) st.measures.shift();
+            st.marmed = false; st.msel = st.measures.length - 1;
             if (!rulerUnits()) rulerCalibrate(st.measures[st.measures.length - 1]);
             notesRender();
         }
@@ -10049,7 +10076,26 @@
             try { localStorage.setItem(rulerScaleKey(), String(st.scale)); } catch (e) { /* масштаб до закрытия листа */ }
             notesRender();
         }
-        function rulerClear() { notesState.measures = []; notesState.rulerA = null; notesRender(); }
+        function rulerClear() { const st = notesState; st.measures = []; st.rulerA = null; st.msel = null; st.marmed = true; notesRender(); }
+        function rulerArm() { const st = notesState; st.marmed = !st.marmed; st.rulerA = null; st.msel = null; notesRender(); }
+        function rulerDelete() {
+            const st = notesState;
+            if (st.msel == null) return;
+            st.measures.splice(st.msel, 1); st.msel = null;
+            if (!st.measures.length) st.marmed = true;
+            notesRender();
+        }
+        // Что под пальцем: конец линейки (кружок) или сама линия.
+        function rulerHit(p) {
+            const st = notesState, k = notesUnitsPerPx();
+            for (let i = st.measures.length - 1; i >= 0; i--) {
+                const { a, b } = st.measures[i];
+                for (const end of ['a', 'b']) { const q = st.measures[i][end]; if (Math.hypot(q[0] - p[0], q[1] - p[1]) <= 16 * k) return { i, end }; }
+                const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L2));
+                if (Math.hypot(a[0] + t * dx - p[0], a[1] + t * dy - p[1]) <= 9 * k) return { i, end: '' };
+            }
+            return null;
+        }
         function rulerLabel(a, b) {
             const u = rulerUnits();
             return u ? fmtLen(rulerLenUnits(a, b) * u) : '? м';
@@ -10197,7 +10243,7 @@
             document.body.appendChild(a); a.click(); a.remove();
             setTimeout(() => URL.revokeObjectURL(a.href), 2000);
         }
-        function mafSetTool(t) { notesState.maf.tool = t; notesState.rulerA = null; notesRender(); }
+        function mafSetTool(t) { const st = notesState; st.maf.tool = t; st.rulerA = null; st.msel = null; st.marmed = t === 'ruler' && !st.measures.length; notesRender(); }
         function mafFocus(mark) { const st = notesState; st.maf.focus = st.maf.focus === mark ? '' : mark; notesRender(); }
         function mafZoomTo(id) {
             const st = notesState, it = st.mafData.items.find(i => i.id === id);
@@ -10226,7 +10272,9 @@
         }
         function stageOverlaySvg(k) {
             const st = notesState;
-            return (st.mode === 'maf' ? mafOverlaySvg(k) : '') + st.measures.map(m => measureSvg(m.a, m.b, k)).join('');
+            const edit = stageRulerOn();
+            const handle = (p, sel) => `<circle cx="${p[0]}" cy="${p[1]}" r="${(sel ? 8 : 6) * k}" fill="#fff" stroke="${MEASURE_COLOR}" stroke-width="${(sel ? 3 : 2) * k}"/>`;
+            return (st.mode === 'maf' ? mafOverlaySvg(k) : '') + st.measures.map((m, i) => `<g data-measure="${i}"${i === st.msel ? ' data-sel="1"' : ''}>${measureSvg(m.a, m.b, k)}${edit ? handle(m.a, i === st.msel) + handle(m.b, i === st.msel) : ''}</g>`).join('');
         }
         function stageDraftSvg(k) {
             const st = notesState;
@@ -10244,16 +10292,19 @@
             document.getElementById('notesZoomBtns').classList.remove('hidden');
             const btn = (on, attrs, ic, label, title) => `<button ${attrs} title="${title}" class="h-9 px-3 flex-shrink-0 rounded-lg text-sm font-semibold whitespace-nowrap ${on ? 'bg-brand-600 text-white' : 'text-slate-700 hover:bg-slate-200'}"><i class="fa-solid ${ic} mr-1"></i>${label}</button>`;
             const sep = '<span class="w-px h-6 bg-slate-300 mx-1 flex-shrink-0"></span>';
-            const clear = st.measures.length ? btn(false, 'id="rulerClearBtn" onclick="rulerClear()"', 'fa-eraser', `Стереть замеры (${st.measures.length})`, 'Убрать все линии замеров') : '';
+            const clear = (st.msel != null ? btn(false, 'id="rulerDelBtn" onclick="rulerDelete()"', 'fa-trash', 'Удалить замер', 'Убрать выбранную линейку') : '')
+                + (st.measures.length ? btn(false, 'id="rulerClearBtn" onclick="rulerClear()"', 'fa-eraser', `Стереть все (${st.measures.length})`, 'Убрать все линии замеров') : '');
+            const newBtn = btn(st.marmed, 'id="rulerNewBtn" onclick="rulerArm()"', 'fa-plus', 'Новый замер', 'Провести новую линейку');
+            const hint = `<span id="rulerHint" class="text-xs text-slate-500 px-1 flex-shrink-0">${st.marmed ? 'Протяните линию или нажмите две точки — концы прилипают к линиям чертежа.' : st.measures.length ? 'Тяните за кружок — длина и поворот, за линию — перенос. План двигается как обычно.' : ''}</span>`;
             const exp = `${sep}${btn(false, 'onclick="notesExportJpeg()"', 'fa-image', 'JPEG', 'Скачать картинкой (JPEG)')}${btn(false, 'onclick="notesExportPdf()"', 'fa-file-pdf', 'PDF', 'Скачать PDF')}`;
             const units = st.plan?.image ? btn(false, 'id="rulerScaleBtn" onclick="rulerCalibrate()"', 'fa-arrows-left-right-to-line', rulerUnits() ? 'Масштаб задан' : 'Задать масштаб', 'Последний замер приравнять к известной длине') : '';
             let bar;
             if (st.mode === 'measure') {
-                bar = `<span class="text-xs text-slate-500 px-1 flex-shrink-0">Протяните линию или нажмите две точки. Точки прилипают к линиям чертежа.</span>${clear ? sep + clear : ''}${units}${exp}`;
+                bar = `${newBtn}${clear ? sep + clear : ''}${units}${exp}${hint}`;
             } else {
                 bar = `${btn(st.maf.tool === 'mark', 'data-stage-tool="mark" onclick="mafSetTool(\'mark\')"', 'fa-hand-pointer', 'Отметить', 'Нажмите на МАФ — отметка «установлено»')}
-                    ${btn(st.maf.tool === 'ruler', 'data-stage-tool="ruler" onclick="mafSetTool(\'ruler\')"', 'fa-ruler', 'Линейка', 'Измерить расстояние на плане')}${sep}
-                    ${[['all', 'Все'], ['left', 'Остаток'], ['done', 'Установлено']].map(([v, l]) => btn(st.maf.show === v, `data-maf-show="${v}" onclick="mafSetShow('${v}')"`, v === 'left' ? 'fa-circle-exclamation' : v === 'done' ? 'fa-circle-check' : 'fa-layer-group', l, v === 'left' ? 'Подсветить, что ещё не установлено' : v === 'done' ? 'Показать только установленные' : 'Показать все МАФ')).join('')}${clear ? sep + clear : ''}${exp}`;
+                    ${btn(st.maf.tool === 'ruler', 'data-stage-tool="ruler" onclick="mafSetTool(\'ruler\')"', 'fa-ruler', 'Линейка', 'Измерить расстояние на плане')}${st.maf.tool === 'ruler' ? newBtn + clear : ''}${sep}
+                    ${[['all', 'Все'], ['left', 'Остаток'], ['done', 'Установлено']].map(([v, l]) => btn(st.maf.show === v, `data-maf-show="${v}" onclick="mafSetShow('${v}')"`, v === 'left' ? 'fa-circle-exclamation' : v === 'done' ? 'fa-circle-check' : 'fa-layer-group', l, v === 'left' ? 'Подсветить, что ещё не установлено' : v === 'done' ? 'Показать только установленные' : 'Показать все МАФ')).join('')}${st.maf.tool !== 'ruler' && clear ? sep + clear : ''}${exp}${st.maf.tool === 'ruler' ? hint : ''}`;
             }
             document.getElementById('notesToolbar').innerHTML = bar;
             if (st.vb) notesApplyViewBox();
