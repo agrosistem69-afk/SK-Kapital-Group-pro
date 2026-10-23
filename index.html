@@ -17,10 +17,10 @@
     </script>
 
     <!-- PWA -->
-    <link rel="manifest" href="manifest.json?v=60">
-    <link rel="icon" type="image/png" href="favicon.png?v=60">
+    <link rel="manifest" href="manifest.json?v=61">
+    <link rel="icon" type="image/png" href="favicon.png?v=61">
     <meta name="theme-color" content="#0b1730">
-    <link rel="apple-touch-icon" href="icons/icon-192.png?v=60">
+    <link rel="apple-touch-icon" href="icons/icon-192.png?v=61">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="SKKG Pro">
@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '60';
+        window.APP_VERSION = '61';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=60">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=60">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=60">
+    <link rel="stylesheet" href="vendor/app.css?v=61">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=61">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=61">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=60" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=60" defer></script>
-    <script src="vendor/jszip.min.js?v=60" defer></script>
+    <script src="vendor/html2canvas.min.js?v=61" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=61" defer></script>
+    <script src="vendor/jszip.min.js?v=61" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=60"></script>
+    <script src="vendor/supabase.js?v=61"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -1891,7 +1891,7 @@
         <div class="flex items-center gap-3 px-4 py-2 bg-slate-900 text-white">
             <div class="min-w-0 flex-1">
                 <div class="text-sm font-semibold">Объёмы по зонам</div>
-                <select id="zonesSheet" onchange="zonesLoadSheet(this.value)" class="mt-1 max-w-full bg-slate-800 text-white text-xs rounded px-2 py-1 focus:outline-none"></select>
+                <select id="zonesSheet" onchange="zonesPickSheet(this.value)" class="mt-1 max-w-full bg-slate-800 text-white text-xs rounded px-2 py-1 focus:outline-none"></select>
             </div>
             <button onclick="showHelp('zones')" title="Подсказка: как здесь всё работает" class="w-8 h-8 flex-shrink-0 rounded-full border-2 border-white/70 hover:bg-white/10 flex items-center justify-center text-sm font-bold">?</button>
             <button onclick="closeZones()" class="w-9 h-9 flex-shrink-0 rounded-lg hover:bg-white/10 flex items-center justify-center" title="Закрыть"><i class="fa-solid fa-xmark"></i></button>
@@ -6553,6 +6553,16 @@
             volumesState = { projectId, materials: m.data || [], deliveries: d.data || [], aliases: a.data || [], mafInstalls: mi.error ? [] : (mi.data || []), drawings: dr.error ? [] : (dr.data || []) };
         }
 
+        // После отметок на плане МАФ — свежие «Установлено» в «Объёмах» и в «По зонам».
+        async function volumesRefreshMaf() {
+            if (!volumesState?.projectId) return;
+            const st = volumesState, { data, error } = await sb.from('maf_installs').select('sheet,item_id,mark').eq('project_id', st.projectId);
+            if (error || volumesState !== st) return;
+            st.mafInstalls = data || [];
+            if (zonesState?.plan) zonesRender();
+            if (!document.getElementById('volumesScreen')?.classList.contains('hidden')) renderVolumes();
+        }
+
         // Сколько штук этой марки отмечено «установлено» на листе, из которого взят материал (drawing_ref = «лист#марка»).
         function materialInstalled(m) {
             if (!m?.drawing_ref || !volumesState.mafInstalls?.length) return null;
@@ -6622,7 +6632,7 @@
                         <span class="text-xs text-slate-500">${list.length} мат.${done ? ` · поставлено полностью ${done}` : ''}</span>
                     </summary>
                     <div class="px-2 pb-2 space-y-2">
-                        ${mafDrawing ? `<button data-maf-open="${escapeHtml(mafDrawing.id)}" onclick="openDrawingViewer(this.dataset.mafOpen, { maf: true })" class="w-full h-11 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold flex items-center justify-center gap-2"><i class="fa-solid fa-chair"></i>Отметить установку на плане</button>` : ''}
+                        ${mafDrawing ? `<div class="text-xs text-slate-500 px-2 pt-1"><i class="fa-solid fa-circle-info mr-1"></i>Отметки установки МАФ — кнопка «По зонам» вверху, лист «${escapeHtml(mafDrawing.sheet)}».</div>` : ''}
                         ${catOrder.map(cat => `
                             ${cat ? `<div class="text-[11px] font-bold text-slate-400 uppercase tracking-wide px-2 pt-2">${escapeHtml(cat)}</div>` : ''}
                             ${byCat[cat].map(materialCard).join('')}`).join('')}
@@ -7465,6 +7475,7 @@
             if (zonesState !== st || st.drawing !== d) return;
             if (error || !blob) { zonesSetLoading('Не удалось открыть лист: ' + (error ? error.message : 'файл не найден')); return; }
             const html = await blob.text();
+            st.maf = parseMafItems(html);
             const plan = await parsePlanData(html);
             if (zonesState !== st || st.drawing !== d) return;
             if (!plan) { zonesSetLoading('В этом листе нет плана, на котором можно выделить зоны.'); return; }
@@ -7637,6 +7648,7 @@
             zonesRenderOverlay();
             zonesRenderToolbar();
             zonesRenderPanel();
+            zonesMafBanner();
         }
 
         function zonesRenderToolbar() {
@@ -7750,6 +7762,33 @@
             const unmarked = st.rows.filter(r => r.pos && !withCallouts.has(r.pos));
             const union = zonesUnionArea(st.zones);
             return { rows, overlap: overlap || union.overlap, unmarked, areas: st.zones.map(z => zoneArea(z.pts)), areaTotal: union.area };
+        }
+
+        // Лист с МАФ: отметки «установлено» ставятся здесь же, в «По зонам», — открывается план монтажа МАФ.
+        async function zonesPickSheet(id) {
+            await zonesLoadSheet(id);
+            if (zonesState?.maf && zonesState.drawing?.id === id) zonesOpenMaf();
+        }
+        function zonesMafCounts() {
+            const st = zonesState, sheet = normName(st.drawing.sheet), ids = new Set(st.maf.items.map(i => i.id));
+            const done = (volumesState?.mafInstalls || []).filter(r => r.sheet === sheet && ids.has(r.item_id)).length;
+            return { total: st.maf.items.length, done };
+        }
+        function zonesMafBanner() {
+            const st = zonesState, panel = document.getElementById('zonesPanel');
+            if (!st?.maf || !st.plan) return;
+            const c = zonesMafCounts();
+            panel.insertAdjacentHTML('afterbegin', `<div id="zonesMafBox" class="mb-4 bg-brand-50 border border-brand-200 rounded-xl p-3">
+                <div class="font-bold text-slate-800"><i class="fa-solid fa-chair mr-1 text-brand-600"></i>Монтаж МАФ</div>
+                <div class="text-sm text-slate-600 mt-1">Установлено <b class="text-emerald-700">${c.done}</b> из <b>${c.total}</b> · осталось <b class="text-orange-600">${c.total - c.done}</b></div>
+                <button id="zonesMafBtn" onclick="zonesOpenMaf()" class="mt-2 w-full h-11 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold flex items-center justify-center gap-2"><i class="fa-solid fa-hand-pointer"></i>Отметить установку МАФ</button>
+            </div>`);
+        }
+        function zonesOpenMaf() {
+            const st = zonesState;
+            if (!st?.drawing) return;
+            document.getElementById('drawingViewerModal').style.zIndex = '70';   // поверх «По зонам»; закрыли — снова «По зонам»
+            openDrawingViewer(st.drawing.id, { maf: true });
         }
 
         function zonesRenderPanel() {
@@ -8981,7 +9020,7 @@
                         <li><b>По проекту</b> — сколько нужно по последней редакции чертежей.</li>
                         <li><b>Поставлено</b> — сколько уже привезли по документам (из 1С или внесено вручную).</li>
                         <li><b>Осталось</b> — сколько ещё нужно поставить. Если привезли больше проекта, вместо него будет красное «Сверх проекта».</li>
-                        <li><b>Установлено</b> (у МАФ) — сколько скамей, урн, велопарковок отмечено на чертеже как установленные: в папке «МАФ» нажмите «Отметить установку на плане». Нажимайте на МАФ по очереди; «Остаток» подсвечивает, что ещё не установлено, вкладка «Реестр» — список отмеченных, «Скачать реестр (Excel)» — таблица. МАФ лежат в папке «МАФ».</li>
+                        <li><b>Установлено</b> (у МАФ) — сколько скамей, урн, велопарковок отмечено на чертеже как установленные: нажмите «По зонам» и выберите лист с МАФ — откроется план монтажа. Нажимайте на МАФ по очереди; «Остаток» подсвечивает, что ещё не установлено, вкладка «Реестр» — список отмеченных, «Скачать реестр (Excel)» — таблица. МАФ лежат в папке «МАФ».</li>
                     </ul>
                     ${helpH('Кнопки')}
                     <div class="space-y-3">
@@ -9373,7 +9412,7 @@
 
         // opts.maf — открыть сразу в режиме отметок МАФ (из «Объёмов»). Из «Чертежей» лист открывается обычным просмотром.
         async function openDrawingViewer(drawingId, opts = {}) {
-            const d = (appData.drawings || []).find(x => x.id === drawingId) || (volumesState?.drawings || []).find(x => x.id === drawingId);
+            const d = [...(appData.drawings || []), ...(volumesState?.drawings || []), ...(zonesState?.drawings || [])].find(x => x.id === drawingId);
             if (!d) return;
             const frame = document.getElementById('drawingViewerFrame');
             const loading = document.getElementById('drawingViewerLoading');
@@ -9408,7 +9447,10 @@
         }
 
         function closeDrawingViewer() {
+            const wasMaf = notesState?.mode === 'maf' && notesState.maf?.loaded;
             notesReset(null);
+            document.getElementById('drawingViewerModal').style.zIndex = '';
+            if (wasMaf) volumesRefreshMaf();
             closeModal('drawingViewerModal');
             const frame = document.getElementById('drawingViewerFrame');
             frame.removeAttribute('src');

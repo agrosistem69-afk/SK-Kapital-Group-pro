@@ -1768,11 +1768,21 @@ test('МАФ: отмечаю установленные на плане — ви
     expect(urn && urn.includes('Установлено 1 из 2 · осталось установить 1'), 'в «Объёмах» у урны нет факта установки: ' + urn);
     expect(bench && bench.includes('Установлено 1 из 1 · осталось установить 0'), 'в «Объёмах» у скамьи нет факта установки: ' + bench);
     expect(await page.$('#volumesList details[data-sec="МАФ"]'), 'в «Объёмах» нет папки «МАФ»');
-    // Из папки «МАФ» план открывается сразу в режиме отметок — даже если «Чертежи» в этот раз не открывали.
+    // Отметки МАФ — в «По зонам»: у листа с МАФ кнопка «Отметить установку МАФ» (даже если «Чертежи» не открывали).
     await page.evaluate(async () => { appData.drawings = []; await showVolumesScreen(); });
-    await page.waitForSelector('#volumesList [data-maf-open="d1"]', { timeout: 15000 });
-    await page.click('#volumesList [data-maf-open="d1"]');
+    await page.waitForSelector('#volumesList details[data-sec="МАФ"]', { timeout: 15000 });
+    await page.evaluate(() => openZonesCounter());
+    await page.waitForSelector('#zonesMafBtn', { timeout: 15000 });
+    expect((await page.textContent('#zonesMafBox')).replace(/\s+/g, ' ').includes('Установлено 2 из 3'), 'в «По зонам» нет итога МАФ: ' + await page.textContent('#zonesMafBox'));
+    await page.click('#zonesMafBtn');
     await page.waitForFunction(() => notesState?.open && notesState.mode === 'maf' && notesState.maf.loaded && document.querySelectorAll('#notesMarks [data-maf][data-done="1"]').length === 2, null, { timeout: 15000 });
+    expect(await page.$eval('#drawingViewerModal', el => el.style.zIndex === '70'), 'план МАФ открылся под «По зонам»');
+    // Отметили ещё один и закрыли — «По зонам» на месте, итог обновился.
+    await stageTap(page, 5.15, 11.15);
+    await page.waitForFunction(() => __db.maf_installs.length === 3);
+    await page.evaluate(() => closeDrawingViewer());
+    await page.waitForFunction(() => (document.getElementById('zonesMafBox')?.textContent || '').replace(/\s+/g, ' ').includes('Установлено 3 из 3'), null, { timeout: 15000 });
+    await page.evaluate(() => closeZones());
     // А из «Чертежей» тот же лист — обычный просмотр, без кнопки «МАФ».
     await page.evaluate(() => closeDrawingViewer());
     await page.evaluate(() => openDrawingViewer('d1'));
