@@ -17,10 +17,10 @@
     </script>
 
     <!-- PWA -->
-    <link rel="manifest" href="manifest.json?v=58">
-    <link rel="icon" type="image/png" href="favicon.png?v=58">
+    <link rel="manifest" href="manifest.json?v=59">
+    <link rel="icon" type="image/png" href="favicon.png?v=59">
     <meta name="theme-color" content="#0b1730">
-    <link rel="apple-touch-icon" href="icons/icon-192.png?v=58">
+    <link rel="apple-touch-icon" href="icons/icon-192.png?v=59">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="SKKG Pro">
@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '58';
+        window.APP_VERSION = '59';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=58">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=58">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=58">
+    <link rel="stylesheet" href="vendor/app.css?v=59">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=59">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=59">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=58" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=58" defer></script>
-    <script src="vendor/jszip.min.js?v=58" defer></script>
+    <script src="vendor/html2canvas.min.js?v=59" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=59" defer></script>
+    <script src="vendor/jszip.min.js?v=59" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=58"></script>
+    <script src="vendor/supabase.js?v=59"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -1846,6 +1846,7 @@
                     <div id="notesToolbar" class="flex items-center gap-1 px-2 py-1.5 border-b border-slate-200 bg-slate-50 overflow-x-auto"></div>
                     <div class="relative flex-1 min-h-0">
                         <svg id="notesSvg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" class="absolute inset-0 w-full h-full touch-none select-none"><g id="notesPlan"></g><g id="notesMarks"></g><g id="notesDraft"></g></svg>
+                        <div id="mafPick" class="absolute hidden z-10 w-64 max-h-72 overflow-y-auto bg-white border border-slate-300 rounded-xl shadow-xl p-1"></div>
                         <div id="notesSets" class="absolute inset-0 hidden overflow-y-auto bg-slate-50 p-4"></div>
                         <div id="notesMsg" class="absolute inset-0 hidden items-center justify-center text-sm text-slate-500 p-6 text-center bg-white"></div>
                         <div id="notesZoomBtns" class="absolute right-2 bottom-2 flex flex-col gap-1">
@@ -9555,6 +9556,7 @@
             const stage = document.getElementById('notesStage');
             st.open = !(st.open && st.mode === mode);
             st.mode = mode; st.selected = null; st.draft = null; st.mdraft = null; st.rulerA = null; st.msel = null;
+            mafPickClose();
             st.marmed = mode === 'measure' && !st.measures.length;   // пустой замер — сразу можно провести линию
             stage.classList.toggle('hidden', !st.open);
             stage.classList.toggle('flex', st.open);
@@ -9887,6 +9889,7 @@
             svg.addEventListener('pointerdown', e => {
                 const st = notesState;
                 if (!st?.vb) return;
+                mafPickClose();
                 svg.setPointerCapture(e.pointerId);
                 pointers.set(e.pointerId, [e.clientX, e.clientY]);
                 if (pointers.size === 2) {
@@ -9993,7 +9996,7 @@
                     else if (g.moved) { g.mark.data = g.orig.data; notesRenderMarks(); }
                     else if (done && g.type === 'move') notesPickAt(e);
                 } else if (g?.type === 'pan' && !g.moved && done && pointers.size === 0) {
-                    if (st.mode === 'maf' && st.maf.tool === 'mark') mafTapAt(notesToPlan(e.clientX, e.clientY));
+                    if (st.mode === 'maf' && st.maf.tool === 'mark') mafTapAt(notesToPlan(e.clientX, e.clientY), e);
                     else if (st.mode !== 'notes') { if (st.msel != null) { st.msel = null; notesRender(); } }   // касание мимо линейки — снять выбор, ничего не рисуя
                     else if (st.tool === 'text') notesAddText(e); else notesPickAt(e);
                 }
@@ -10192,16 +10195,49 @@
             const s = mafSummary(), total = s.reduce((a, r) => a + r.total, 0), done = s.reduce((a, r) => a + r.done, 0);
             return `${notesState.maf.zone ? notesState.maf.zone + ': ' : ''}установлено ${done} из ${total}, осталось ${total - done}`;
         }
-        function mafTapAt(p) {
-            const st = notesState, tol = 10 * notesUnitsPerPx();
-            let best = null, bd = Infinity;
+        // Что под пальцем: если касание внутри рамки — эта рамка (самая маленькая из вложенных);
+        // если рядом несколько МАФ на одинаковом расстоянии — показываем список, чтобы выбрать нужный.
+        function mafCandidates(p) {
+            const st = notesState, k = notesUnitsPerPx(), tol = 10 * k;
+            const hits = [];
             (st.mafData?.items || []).forEach(it => {
                 const [x0, x1, y0, y1] = it.box, dx = Math.max(x0 - p[0], 0, p[0] - x1), dy = Math.max(y0 - p[1], 0, p[1] - y1);
                 const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-                const d = Math.min(Math.hypot(dx, dy), Math.max(0, Math.hypot(cx - p[0], cy - p[1]) - 7 * notesUnitsPerPx()));
-                if (d <= tol && d < bd) { bd = d; best = it; }
+                const d = Math.min(Math.hypot(dx, dy), Math.max(0, Math.hypot(cx - p[0], cy - p[1]) - MAF_DOT * k));
+                if (d <= tol) hits.push({ it, d, inside: dx === 0 && dy === 0, area: (x1 - x0) * (y1 - y0) });
             });
-            if (best) mafToggle(best);
+            if (!hits.length) return [];
+            const inside = hits.filter(h => h.inside).sort((a, b) => a.area - b.area);
+            // Касание внутри одной рамки, и рядом нет других рамок того же размера — выбор однозначен.
+            if (inside.length && hits.filter(h => h.d <= 3 * k && h.area <= inside[0].area * 4).length === 1) return [inside[0].it];
+            hits.sort((a, b) => a.d - b.d || a.area - b.area);
+            const near = hits.filter(h => h.d <= hits[0].d + 4 * k);
+            return (near.length > 1 ? near : [hits[0]]).map(h => h.it);
+        }
+        function mafTapAt(p, e) {
+            mafPickClose();
+            const c = mafCandidates(p);
+            if (c.length === 1) mafToggle(c[0]);
+            else if (c.length > 1) mafPickShow(c, e);
+        }
+        function mafPickShow(items, e) {
+            const st = notesState, inst = mafInstalled(), box = document.getElementById('mafPick'), host = box.parentElement.getBoundingClientRect();
+            box.innerHTML = `<div class="px-2 py-1 text-[11px] font-bold text-slate-400 uppercase">Рядом несколько — выберите</div>` + items.map(it => `<button data-maf-pick="${escapeHtml(it.id)}" onclick="mafPickChoose(this.dataset.mafPick)" onmouseenter="mafPickHover(this.dataset.mafPick)" onmouseleave="mafPickHover('')"
+                class="w-full text-left px-2 py-1.5 rounded-lg hover:bg-slate-100 flex items-center gap-2 text-sm"><i class="fa-solid ${inst.has(it.id) ? 'fa-circle-check text-emerald-600' : 'fa-circle text-orange-400'}"></i><b class="w-12 flex-shrink-0">${escapeHtml(it.id)}</b><span class="truncate"><b>${escapeHtml(it.p)}</b> <span class="text-xs text-slate-500">${escapeHtml(st.mafData.names[it.p] || '')}</span></span></button>`).join('')
+                + `<button onclick="mafPickClose()" class="w-full text-center px-2 py-1 text-xs text-slate-500 hover:text-slate-700">Отмена</button>`;
+            box.classList.remove('hidden');
+            const x = (e?.clientX ?? host.left + host.width / 2) - host.left, y = (e?.clientY ?? host.top + host.height / 2) - host.top;
+            box.style.left = Math.max(4, Math.min(x + 12, host.width - box.offsetWidth - 4)) + 'px';
+            box.style.top = Math.max(4, Math.min(y + 12, host.height - box.offsetHeight - 4)) + 'px';
+            st.maf.pick = items.map(i => i.id);
+            notesRenderMarks();
+        }
+        function mafPickHover(id) { notesState.maf.hover = id; notesRenderMarks(); }
+        function mafPickChoose(id) { const it = notesState.mafData.items.find(i => i.id === id); mafPickClose(); if (it) mafToggle(it); }
+        function mafPickClose() {
+            const box = document.getElementById('mafPick');
+            if (box && !box.classList.contains('hidden')) { box.classList.add('hidden'); box.innerHTML = ''; }
+            if (notesState?.maf?.pick) { notesState.maf.pick = null; notesState.maf.hover = ''; notesRenderMarks(); }
         }
         async function mafToggle(it) {
             const st = notesState;
@@ -10252,6 +10288,7 @@
             st.vb = [cx - w / 2, cy - h / 2, w, h];
             notesApplyViewBox();
         }
+        const MAF_DOT = 5;   // радиус точки у мелких МАФ, в пикселях экрана
         function mafOverlaySvg(k) {
             const st = notesState, inst = mafInstalled(), focus = st.maf.focus;
             return (st.mafData?.items || []).map(it => {
@@ -10260,10 +10297,13 @@
                 const off = (focus && it.p !== focus) || (st.maf.zone && it.z !== st.maf.zone);
                 const hide = (st.maf.show === 'left' && done) || (st.maf.show === 'done' && !done);
                 const op = hide ? ' opacity="0.12"' : off ? ' opacity="0.25"' : '';
-                const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, small = Math.max(x1 - x0, y1 - y0) / k < 14;
+                const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, small = Math.max(x1 - x0, y1 - y0) / k < 8;
                 let body = st.maf.show === 'left' && !done && !off ? `<circle class="maf-pulse" cx="${cx}" cy="${cy}" r="${Math.max(13 * k, Math.hypot(x1 - x0, y1 - y0) / 2 + 5 * k)}" fill="none" stroke="#ea580c" stroke-width="${3 * k}"/>` : '';
-                body += small ? `<circle cx="${cx}" cy="${cy}" r="${7 * k}" fill="${c}" stroke="#fff" stroke-width="${1.5 * k}"/>` : '';
-                body += `<rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" fill="${c}" fill-opacity="0.55" stroke="${c}" stroke-width="${1.5 * k}"/>`;
+                // Рамка точно по контуру объекта из DWG, заливка прозрачная — сам объект на чертеже виден сквозь неё.
+                // Совсем мелкие (на этом масштабе) — ещё и точка в центре, чтобы было видно и куда нажать.
+                body += small ? `<circle cx="${cx}" cy="${cy}" r="${MAF_DOT * k}" fill="${c}" fill-opacity="0.85" stroke="#fff" stroke-width="${1.2 * k}"/>` : '';
+                body += `<rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" fill="${c}" fill-opacity="0.22" stroke="${c}" stroke-width="${1.5 * k}"/>`;
+                if (st.maf.pick?.includes(it.id)) body += `<rect x="${x0 - 3 * k}" y="${y0 - 3 * k}" width="${x1 - x0 + 6 * k}" height="${y1 - y0 + 6 * k}" fill="none" stroke="${st.maf.hover === it.id ? '#2563eb' : '#64748b'}" stroke-width="${(st.maf.hover === it.id ? 3 : 1.5) * k}"/>`;
                 if (done && !small) body += `<path d="M${cx - 4 * k},${cy}l${3 * k},${3 * k}l${6 * k},${-6 * k}" fill="none" stroke="#fff" stroke-width="${2 * k}"/>`;
                 // Номер и марка — когда план приближен настолько, что подписи не слипаются.
                 if (k < 0.06) { const fs = 11 * k; body += `<text x="${x1 + 3 * k}" y="${y0 - 2 * k}" font-size="${fs}" font-family="Inter, Arial, sans-serif" font-weight="700" fill="${done ? '#166534' : '#9a3412'}" stroke="#fff" stroke-width="${fs * 0.25}" paint-order="stroke">${escapeHtml(it.id + ' · ' + it.p)}</text>`; }

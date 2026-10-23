@@ -1699,9 +1699,9 @@ test('Нет связи с базой — кнопка «Войти» показ
 });
 
 // Лист МАФ: две линии борта (y = 10 и y = 20 м), три МАФ с номерами, ведомость и список МАФ для отметок.
-function mafSheetHtml() {
+function mafSheetHtml(extra = []) {
     const box = ([x0, x1, y0, y1]) => `M${x0} ${y0}L${x1} ${y0} ${x1} ${y1} ${x0} ${y1}z`;
-    const items = [{ id: 'А1', p: 'У-1', z: 'Двор', box: [5, 5.3, 11, 11.3] }, { id: 'А2', p: 'У-1', z: 'Бульвар', box: [10, 10.3, 11, 11.3] }, { id: 'А3', p: 'СК-1', z: 'Двор', box: [20, 22, 11, 11.6] }];
+    const items = [{ id: 'А1', p: 'У-1', z: 'Двор', box: [5, 5.3, 11, 11.3] }, { id: 'А2', p: 'У-1', z: 'Бульвар', box: [10, 10.3, 11, 11.3] }, { id: 'А3', p: 'СК-1', z: 'Двор', box: [20, 22, 11, 11.6] }, ...extra];
     const plan = '<path class="st" data-s="ctx" stroke="#777" d="M0 10L40 10"/><path class="st" data-s="ctx" stroke="#777" d="M0 20L40 20"/>'
         + items.map(i => `<g class="it" data-s="maf" data-p="${i.p}" data-id="${i.id}"><path class="mf" fill="#f97316" d="${box(i.box)}"/></g>`).join('');
     const planz = require('zlib').gzipSync(Buffer.from(plan)).toString('base64');
@@ -1804,6 +1804,32 @@ test('МАФ: отмечаю подряд несколько, реестр от�
     const csv = require('fs').readFileSync(await dl.path(), 'utf8');
     const dlName = await page.evaluate(() => window.__dlName);
     expect(/^Реестр МАФ - Лист 1.*\.csv$/.test(dlName) && csv.split('\r\n').length === 4 && /"А3";"СК-1";"Скамья";"Двор";"установлен";"[\d.]+";"Грег"/.test(csv) && csv.includes('"А2";"У-1";"Урна";"Бульвар";"не установлен"'), 'CSV неверный: ' + dlName + ' ' + JSON.stringify(csv));
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
+test('МАФ: плотно стоящие — выбор из списка, касание внутри рамки — сразу нужный', async () => {
+    const page = await openApp({ admin: true });
+    // Три велопарковки вплотную (0,74 м шириной, шаг 0,9 м).
+    const racks = [0, 1, 2].map(i => ({ id: 'В' + (i + 1), p: 'У-1', z: 'Двор', box: [30 + i * 0.9, 30.74 + i * 0.9, 24, 25.85] }));
+    await openStage(page, mafSheetHtml(racks));
+    await page.waitForFunction(() => document.querySelectorAll('#notesMarks [data-maf]').length === 6, null, { timeout: 15000 });
+    // Весь лист: парковки сливаются — касание между ними открывает список, ничего не отмечая.
+    await stageTap(page, 30.82, 24.9);
+    await page.waitForSelector('#mafPick:not(.hidden)');
+    const ids = await page.$$eval('#mafPick [data-maf-pick]', b => b.map(x => x.dataset.mafPick).sort().join());
+    expect(/^В1,В2(,В3)?$/.test(ids), 'в списке не те МАФ: ' + ids);
+    expect(await page.evaluate(() => __db.maf_installs.length) === 0, 'отметилось без выбора');
+    await page.click('#mafPick [data-maf-pick="В2"]');
+    await page.waitForFunction(() => __db.maf_installs.length === 1);
+    expect(await page.evaluate(() => __db.maf_installs[0].item_id) === 'В2' && await page.$eval('#mafPick', el => el.classList.contains('hidden')), 'выбор из списка не отметил В2');
+    // Приблизили — касание внутри рамки В3 отмечает именно её, без списка.
+    await page.evaluate(() => { notesState.vb = [28, 22, 6, 6]; notesApplyViewBox(); });
+    await stageTap(page, 32.17, 24.5);
+    await page.waitForFunction(() => __db.maf_installs.length === 2);
+    expect(await page.evaluate(() => __db.maf_installs[1].item_id) === 'В3', 'касание внутри рамки отметило не В3');
+    // Рамка стоит ровно на проектных координатах объекта.
+    const r = await page.$eval('#notesMarks [data-maf="В3"] rect', el => [el.getAttribute('x'), el.getAttribute('y'), el.getAttribute('width')].map(Number));
+    expect(near(r[0], 31.8, 1e-6) && near(r[1], 24, 1e-6) && near(r[2], 0.74, 1e-6), 'рамка сдвинута: ' + r);
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
