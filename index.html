@@ -17,10 +17,10 @@
     </script>
 
     <!-- PWA -->
-    <link rel="manifest" href="manifest.json?v=62">
-    <link rel="icon" type="image/png" href="favicon.png?v=62">
+    <link rel="manifest" href="manifest.json?v=63">
+    <link rel="icon" type="image/png" href="favicon.png?v=63">
     <meta name="theme-color" content="#0b1730">
-    <link rel="apple-touch-icon" href="icons/icon-192.png?v=62">
+    <link rel="apple-touch-icon" href="icons/icon-192.png?v=63">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="SKKG Pro">
@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '62';
+        window.APP_VERSION = '63';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=62">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=62">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=62">
+    <link rel="stylesheet" href="vendor/app.css?v=63">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=63">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=63">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=62" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=62" defer></script>
-    <script src="vendor/jszip.min.js?v=62" defer></script>
+    <script src="vendor/html2canvas.min.js?v=63" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=63" defer></script>
+    <script src="vendor/jszip.min.js?v=63" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=62"></script>
+    <script src="vendor/supabase.js?v=63"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -992,6 +992,12 @@
                     <span class="text-sm"><span class="font-semibold text-slate-800"><i class="fa-solid fa-volume-high mr-1 text-brand-600"></i>Звук при запуске и входе</span>
                     <span class="block text-xs text-slate-500 mt-0.5">Короткая мелодия при появлении заставки и при входе. Работает, если на телефоне включён звук.</span></span>
                 </label>
+                <!-- Телефон может держать старые файлы сайта: эта кнопка скачивает свежую версию (вход сохраняется) -->
+                <div class="flex items-center gap-3 p-3 border border-slate-200 rounded-lg">
+                    <div class="flex-1 text-sm"><span class="font-semibold text-slate-800">Версия приложения</span> <b id="accountVersion" class="text-brand-700"></b>
+                        <span id="accountVersionNew" class="block text-xs text-slate-500 mt-0.5">Если на телефоне старая версия — нажмите «Обновить».</span></div>
+                    <button id="accountUpdateBtn" onclick="window.__resetAppFiles()" class="flex-shrink-0 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-3 py-2 rounded-lg"><i class="fa-solid fa-rotate mr-1"></i>Обновить</button>
+                </div>
                 <button onclick="handleLogout()" class="w-full bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2">
                     <i class="fa-solid fa-right-from-bracket"></i> Выйти из аккаунта
                 </button>
@@ -12161,7 +12167,11 @@ ${focusItems.length ? `<div class="mt-3 text-xs font-bold text-slate-400 upperca
                 const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
                 if (!r.ok) return;
                 const { version } = await r.json();
-                if (version && String(version) !== window.APP_VERSION) showUpdateBanner(String(version));
+                if (version && String(version) !== window.APP_VERSION) {
+                    showUpdateBanner(String(version));
+                    const n = document.getElementById('accountVersionNew');
+                    if (n) n.innerHTML = `На сайте уже версия <b>${escapeHtml(String(version))}</b> — нажмите «Обновить».`;
+                }
             } catch (e) { /* нет связи — проверим позже */ }
         }
         function showUpdateBanner(version) {
@@ -12173,6 +12183,7 @@ ${focusItems.length ? `<div class="mt-3 text-xs font-bold text-slate-400 upperca
             d.querySelector('button').onclick = () => window.__resetAppFiles();
             document.body.appendChild(d);
         }
+        document.getElementById('accountVersion').textContent = window.APP_VERSION;
         document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkForNewVersion(); });
         setInterval(checkForNewVersion, 5 * 60 * 1000);
         setTimeout(checkForNewVersion, 3000);

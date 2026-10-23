@@ -887,6 +887,15 @@ test('После публикации новой версии появляетс
     await page.waitForSelector('#updateBanner', { timeout: 5000 });
     const box = await page.$eval('#updateBanner', e => { const r = e.getBoundingClientRect(); return [r.left, r.right, r.bottom]; });
     expect(box[0] >= 0 && box[1] <= 390 && box[2] <= 800, 'кнопка «Обновить» не помещается на экране телефона: ' + box);
+    // В «Аккаунте» видна версия и есть своя кнопка «Обновить» — на случай, если полоска не появилась.
+    expect(await page.$eval('#accountVersion', e => e.textContent) === await page.evaluate(() => window.APP_VERSION), 'в «Аккаунте» не видно версию');
+    expect((await page.textContent('#accountVersionNew')).includes('999'), 'в «Аккаунте» не сказано про новую версию');
+    let reset = 0;
+    await page.exposeFunction('__resetSeen', () => { reset++; });
+    await page.evaluate(() => { window.__resetAppFiles = () => window.__resetSeen(); openModal('accountModal'); });
+    await page.click('#accountUpdateBtn');
+    await page.waitForTimeout(200);
+    expect(reset === 1, 'кнопка «Обновить» в «Аккаунте» не сбрасывает файлы');
     await page.unroute(/version\.json/);
     await page.route(/version\.json/, r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ version: ROOT_FILE('version.json').match(/"version":\s*"([^"]+)/)[1] }) }));
     const page2 = await openApp();
