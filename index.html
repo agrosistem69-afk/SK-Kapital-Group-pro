@@ -17,10 +17,10 @@
     </script>
 
     <!-- PWA -->
-    <link rel="manifest" href="manifest.json?v=61">
-    <link rel="icon" type="image/png" href="favicon.png?v=61">
+    <link rel="manifest" href="manifest.json?v=62">
+    <link rel="icon" type="image/png" href="favicon.png?v=62">
     <meta name="theme-color" content="#0b1730">
-    <link rel="apple-touch-icon" href="icons/icon-192.png?v=61">
+    <link rel="apple-touch-icon" href="icons/icon-192.png?v=62">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="SKKG Pro">
@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '61';
+        window.APP_VERSION = '62';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=61">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=61">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=61">
+    <link rel="stylesheet" href="vendor/app.css?v=62">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=62">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=62">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=61" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=61" defer></script>
-    <script src="vendor/jszip.min.js?v=61" defer></script>
+    <script src="vendor/html2canvas.min.js?v=62" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=62" defer></script>
+    <script src="vendor/jszip.min.js?v=62" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=61"></script>
+    <script src="vendor/supabase.js?v=62"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -7656,7 +7656,9 @@
             const btn = 'pointer-events-auto px-3 py-2 rounded-lg text-sm font-semibold shadow-sm';
             if (!st?.plan) { el.innerHTML = ''; return; }
             const tab = (m, icon, label) => `<button onclick="zonesSetMode('${m}')" class="px-3 py-1.5 rounded-md text-sm font-semibold ${st.mode === m ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-100'}"><i class="fa-solid ${icon} mr-1"></i>${label}</button>`;
-            const modes = `<div class="pointer-events-auto flex bg-white border border-slate-300 rounded-lg p-0.5 shadow-sm">${tab('pick', 'fa-hand-pointer', 'Выбрать участки')}${tab('draw', 'fa-draw-polygon', 'Обвести зону')}</div>`;
+            // Лист с МАФ: заметная кнопка прямо над планом — на телефоне блок справа уезжает вниз, под план.
+            const maf = st.maf ? `<button id="zonesMafTopBtn" onclick="zonesOpenMaf()" class="${btn} bg-orange-500 hover:bg-orange-600 text-white"><i class="fa-solid fa-chair mr-1"></i>Монтаж МАФ</button>` : '';
+            const modes = `<div class="pointer-events-auto flex bg-white border border-slate-300 rounded-lg p-0.5 shadow-sm">${tab('pick', 'fa-hand-pointer', 'Выбрать участки')}${tab('draw', 'fa-draw-polygon', 'Обвести зону')}</div>` + maf;
             if (st.mode === 'pick') {
                 el.innerHTML = modes + (st.picked.size ? `<button onclick="zonesClearPicked()" class="${btn} bg-white border border-slate-300 text-slate-700">Снять выбор</button>` : '');
                 document.getElementById('zonesHint').textContent = 'Нажимайте на участки на плане: они подсветятся и сложатся. Повторное нажатие снимает выбор';
