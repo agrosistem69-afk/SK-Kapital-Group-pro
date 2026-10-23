@@ -1781,10 +1781,10 @@ test('МАФ: отмечаю установленные на плане — ви
     await page.evaluate(async () => { appData.drawings = []; await showVolumesScreen(); });
     await page.waitForSelector('#volumesList details[data-sec="МАФ"]', { timeout: 15000 });
     await page.evaluate(() => openZonesCounter());
+    // Лист с МАФ сразу открывает план монтажа — без лишних кнопок.
     await page.waitForSelector('#zonesMafBtn', { timeout: 15000 });
     expect((await page.textContent('#zonesMafBox')).replace(/\s+/g, ' ').includes('Установлено 2 из 3'), 'в «По зонам» нет итога МАФ: ' + await page.textContent('#zonesMafBox'));
-    expect(await visible(page, '#zonesMafTopBtn'), 'над планом нет кнопки «Монтаж МАФ»');
-    await page.click('#zonesMafTopBtn');
+    expect(!(await page.$('#zonesMafTopBtn')), 'осталась оранжевая кнопка «Монтаж МАФ»');
     await page.waitForFunction(() => notesState?.open && notesState.mode === 'maf' && notesState.maf.loaded && document.querySelectorAll('#notesMarks [data-maf][data-done="1"]').length === 2, null, { timeout: 15000 });
     expect(await page.$eval('#drawingViewerModal', el => el.style.zIndex === '70'), 'план МАФ открылся под «По зонам»');
     // Отметили ещё один и закрыли — «По зонам» на месте, итог обновился.

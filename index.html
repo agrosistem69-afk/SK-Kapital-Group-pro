@@ -17,10 +17,10 @@
     </script>
 
     <!-- PWA -->
-    <link rel="manifest" href="manifest.json?v=63">
-    <link rel="icon" type="image/png" href="favicon.png?v=63">
+    <link rel="manifest" href="manifest.json?v=64">
+    <link rel="icon" type="image/png" href="favicon.png?v=64">
     <meta name="theme-color" content="#0b1730">
-    <link rel="apple-touch-icon" href="icons/icon-192.png?v=63">
+    <link rel="apple-touch-icon" href="icons/icon-192.png?v=64">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="SKKG Pro">
@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '63';
+        window.APP_VERSION = '64';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=63">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=63">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=63">
+    <link rel="stylesheet" href="vendor/app.css?v=64">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=64">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=64">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=63" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=63" defer></script>
-    <script src="vendor/jszip.min.js?v=63" defer></script>
+    <script src="vendor/html2canvas.min.js?v=64" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=64" defer></script>
+    <script src="vendor/jszip.min.js?v=64" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=63"></script>
+    <script src="vendor/supabase.js?v=64"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -7504,6 +7504,8 @@
             zonesSetLoading('');
             zonesApplyViewBox();
             zonesRender();
+            // Лист с МАФ сразу открывает план монтажа (отметки «установлено»); закрыли — снова «По зонам».
+            if (st.maf) zonesOpenMaf();
         }
 
         function zonesApplyViewBox() {
@@ -7662,9 +7664,7 @@
             const btn = 'pointer-events-auto px-3 py-2 rounded-lg text-sm font-semibold shadow-sm';
             if (!st?.plan) { el.innerHTML = ''; return; }
             const tab = (m, icon, label) => `<button onclick="zonesSetMode('${m}')" class="px-3 py-1.5 rounded-md text-sm font-semibold ${st.mode === m ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-100'}"><i class="fa-solid ${icon} mr-1"></i>${label}</button>`;
-            // Лист с МАФ: заметная кнопка прямо над планом — на телефоне блок справа уезжает вниз, под план.
-            const maf = st.maf ? `<button id="zonesMafTopBtn" onclick="zonesOpenMaf()" class="${btn} bg-orange-500 hover:bg-orange-600 text-white"><i class="fa-solid fa-chair mr-1"></i>Монтаж МАФ</button>` : '';
-            const modes = `<div class="pointer-events-auto flex bg-white border border-slate-300 rounded-lg p-0.5 shadow-sm">${tab('pick', 'fa-hand-pointer', 'Выбрать участки')}${tab('draw', 'fa-draw-polygon', 'Обвести зону')}</div>` + maf;
+            const modes = `<div class="pointer-events-auto flex bg-white border border-slate-300 rounded-lg p-0.5 shadow-sm">${tab('pick', 'fa-hand-pointer', 'Выбрать участки')}${tab('draw', 'fa-draw-polygon', 'Обвести зону')}</div>`;
             if (st.mode === 'pick') {
                 el.innerHTML = modes + (st.picked.size ? `<button onclick="zonesClearPicked()" class="${btn} bg-white border border-slate-300 text-slate-700">Снять выбор</button>` : '');
                 document.getElementById('zonesHint').textContent = 'Нажимайте на участки на плане: они подсветятся и сложатся. Повторное нажатие снимает выбор';
@@ -7773,10 +7773,7 @@
         }
 
         // Лист с МАФ: отметки «установлено» ставятся здесь же, в «По зонам», — открывается план монтажа МАФ.
-        async function zonesPickSheet(id) {
-            await zonesLoadSheet(id);
-            if (zonesState?.maf && zonesState.drawing?.id === id) zonesOpenMaf();
-        }
+        async function zonesPickSheet(id) { await zonesLoadSheet(id); }
         function zonesMafCounts() {
             const st = zonesState, sheet = normName(st.drawing.sheet), ids = new Set(st.maf.items.map(i => i.id));
             const done = (volumesState?.mafInstalls || []).filter(r => r.sheet === sheet && ids.has(r.item_id)).length;
