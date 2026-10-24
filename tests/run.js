@@ -1045,6 +1045,37 @@ test('Окно входа в стиле заставки: тёмный фон, �
     expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
 });
 
+test('Безопасность: при регистрации нет списка проектов и человек не добавляет себя в проект сам', async () => {
+    const page = await openApp({ width: 390, height: 844 });
+    await page.evaluate(() => { document.getElementById('appRoot').classList.add('hidden'); document.getElementById('loginScreen').classList.remove('hidden'); toggleAuthMode(); });
+    expect(!(await page.$('#signupProjectSelect')), 'в форме регистрации остался выбор проекта');
+    const r = await page.evaluate(async () => {
+        const tables = [];
+        const origFrom = sb.from.bind(sb);
+        sb.from = (t) => { tables.push(t); return origFrom(t); };
+        sb.auth.signUp = async () => ({ data: { user: { id: 'new1' }, session: { access_token: 'x' } }, error: null });
+        window.alert = () => {};
+        document.getElementById('signupName').value = 'Иван';
+        document.getElementById('signupEmail').value = 'i@b.ru';
+        document.getElementById('signupPassword').value = '1234567';
+        await handleSignup(new Event('submit'));
+        return { tables, pending: Object.keys(localStorage).filter(k => k.startsWith('wc_pending_project_')) };
+    });
+    expect(!r.tables.includes('project_members') && !r.tables.includes('signup_projects'), 'регистрация обращается к участникам проекта: ' + r.tables.join(','));
+    expect(!r.pending.length, 'регистрация запомнила проект для самодобавления');
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'index.html'), 'utf8');
+    expect(!/signup_projects|wc_pending_project_/.test(src), 'в приложении остался код самодобавления в проект');
+    expect(!page.errors.length, 'ошибки на странице: ' + page.errors.join('; '));
+});
+
+test('Безопасность: название проекта на карточке не выполняется как код', async () => {
+    const page = await openApp();
+    await page.evaluate(() => { appData.projects = [{ id: 'p1', name: '<img src=x onerror="window.__xss=1">Проект' }]; showBoardsScreen(); });
+    await page.waitForTimeout(300);
+    expect(!(await page.evaluate(() => window.__xss)), 'код из названия проекта выполнился');
+    expect(await page.evaluate(() => document.body.innerText.includes('<img src=x')), 'название проекта не показано текстом');
+});
+
 test('Звук: мелодия при заставке и при входе, выключается в «Аккаунте»', async () => {
     const page = await openApp({ width: 390, height: 844 });
     expect((await page.evaluate(() => window.__uiSoundLog || [])).includes('intro'), 'при заставке не было звука');
