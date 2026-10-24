@@ -13,9 +13,12 @@ create or replace function public.profiles_guard_staff() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
     if auth.uid() is not null
-       and (new.role is distinct from old.role
-            or new.staff_role is distinct from old.staff_role or new.brigade is distinct from old.brigade
-            or new.worker_id is distinct from old.worker_id or new.id is distinct from old.id)
+       -- Через jsonb: поля, которых в базе нет, не мешают (сравниваются как пустые).
+       and (to_jsonb(new) -> 'role' is distinct from to_jsonb(old) -> 'role'
+            or to_jsonb(new) -> 'staff_role' is distinct from to_jsonb(old) -> 'staff_role'
+            or to_jsonb(new) -> 'brigade' is distinct from to_jsonb(old) -> 'brigade'
+            or to_jsonb(new) -> 'worker_id' is distinct from to_jsonb(old) -> 'worker_id'
+            or new.id is distinct from old.id)
        and not exists (select 1 from public.profiles where id = auth.uid() and role = 'manager') then
         raise exception 'Роль, должность и бригаду меняет только руководитель';
     end if;
@@ -32,10 +35,8 @@ language plpgsql security definer set search_path = public as $$
 begin
     if exists (select 1 from public.profiles where role = 'manager')
        and not exists (select 1 from public.profiles where id = auth.uid() and role = 'manager') then
-        new.role := 'customer';
-        new.staff_role := null;
-        new.brigade := null;
-        new.worker_id := null;
+        -- Через jsonb: поля, которых в базе нет (если какой-то файл не запускали), просто пропускаются.
+        new := jsonb_populate_record(new, jsonb_build_object('role', 'customer', 'staff_role', null, 'brigade', null, 'worker_id', null));
     end if;
     return new;
 end $$;
