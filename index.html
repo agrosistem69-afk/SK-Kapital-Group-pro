@@ -17,10 +17,10 @@
     </script>
 
     <!-- PWA -->
-    <link rel="manifest" href="manifest.json?v=64">
-    <link rel="icon" type="image/png" href="favicon.png?v=64">
+    <link rel="manifest" href="manifest.json?v=65">
+    <link rel="icon" type="image/png" href="favicon.png?v=65">
     <meta name="theme-color" content="#0b1730">
-    <link rel="apple-touch-icon" href="icons/icon-192.png?v=64">
+    <link rel="apple-touch-icon" href="icons/icon-192.png?v=65">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="SKKG Pro">
@@ -29,7 +29,7 @@
          вместо вечной загрузки показываем, что случилось, проверку связи и кнопку «Сбросить и обновить».
          Работает без внешних библиотек, поэтому стоит первым. -->
     <script>
-        window.APP_VERSION = '64';
+        window.APP_VERSION = '65';
         window.__bootFailed = [];
         window.addEventListener('error', function (e) {
             var t = e.target;
@@ -74,15 +74,15 @@
     <!-- Все библиотеки лежат на нашем сайте (папка vendor), а не на чужих серверах: так приложение
          не зависит от их доступности и сохраняется на телефоне для работы при плохой связи.
          Оформление (Tailwind) собрано заранее в vendor/app.css: npm run css в папке tests. -->
-    <link rel="stylesheet" href="vendor/app.css?v=64">
-    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=64">
-    <link rel="stylesheet" href="vendor/inter/inter.css?v=64">
+    <link rel="stylesheet" href="vendor/app.css?v=65">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css?v=65">
+    <link rel="stylesheet" href="vendor/inter/inter.css?v=65">
     <!-- Для отчётов в PDF и архивов — нужны только по нажатию кнопок -->
-    <script src="vendor/html2canvas.min.js?v=64" defer></script>
-    <script src="vendor/jspdf.umd.min.js?v=64" defer></script>
-    <script src="vendor/jszip.min.js?v=64" defer></script>
+    <script src="vendor/html2canvas.min.js?v=65" defer></script>
+    <script src="vendor/jspdf.umd.min.js?v=65" defer></script>
+    <script src="vendor/jszip.min.js?v=65" defer></script>
     <!-- Supabase client (auth + database + realtime) -->
-    <script src="vendor/supabase.js?v=64"></script>
+    <script src="vendor/supabase.js?v=65"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -241,14 +241,8 @@
                             <i class="fa-solid fa-eye"></i>
                         </button>
                     </div>
-                    <div>
-                        <label class="block text-xs font-medium text-slate-600 mb-1">Проект, в котором вы участвуете</label>
-                        <select id="signupProjectSelect" class="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
-                            <option value="">Без проекта (руководитель добавит позже)</option>
-                        </select>
-                    </div>
                     <p id="authError2" class="text-rose-600 text-xs hidden"></p>
-                    <p class="text-[11px] text-slate-400">После регистрации вы получите роль "Заказчик" по умолчанию. Руководитель проекта сможет изменить вашу роль и доступ к проектам вручную.</p>
+                    <p class="text-[11px] text-slate-400">После регистрации вы получите роль "Заказчик" без доступа к проектам. Руководитель откроет вам нужный проект и роль в «Пользователи и роли».</p>
                     <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm py-2.5 rounded-lg transition-colors">Зарегистрироваться</button>
                     <button type="button" onclick="toggleAuthMode()" class="w-full text-brand-700 text-xs font-medium py-1">Уже есть аккаунт? Войти</button>
                 </form>
@@ -2171,22 +2165,6 @@
             }
         });
 
-        // Список проектов для формы регистрации доступен ДО входа в систему
-        // (через публичное view signup_projects — только id и название)
-        (async () => {
-            try {
-                const { data } = await sb.from('signup_projects').select('*').order('name');
-                const select = document.getElementById('signupProjectSelect');
-                if (!select || !data) return;
-                data.forEach(p => {
-                    const opt = document.createElement('option');
-                    opt.value = p.id; opt.textContent = p.name;
-                    select.appendChild(opt);
-                });
-            } catch (err) {
-                console.warn('Не удалось загрузить список проектов для регистрации:', err);
-            }
-        })();
 
         let currentUserProfile = null;
         let currentUserRole = null;
@@ -2375,7 +2353,6 @@
             const fullName = document.getElementById('signupName').value.trim();
             const email = document.getElementById('signupEmail').value.trim();
             const password = document.getElementById('signupPassword').value;
-            const selectedProjectId = document.getElementById('signupProjectSelect').value;
             const errEl = document.getElementById('authError2');
             errEl.classList.add('hidden');
 
@@ -2386,17 +2363,8 @@
                 return;
             }
 
-            if (selectedProjectId && data.user) {
-                if (data.session) {
-                    // Сессия уже активна (подтверждение почты отключено) — можно сразу вступить в проект
-                    await sb.from('project_members').insert({ user_id: data.user.id, project_id: selectedProjectId });
-                } else {
-                    // Подтверждение почты включено: применим выбор при первом входе после подтверждения
-                    localStorage.setItem('wc_pending_project_' + data.user.id, selectedProjectId);
-                }
-            }
-
-            alert('Регистрация прошла успешно! Если подтверждение почты включено — проверьте письмо. Иначе просто войдите под своим email и паролем.');
+            // В проект пользователя добавляет руководитель (supabase/security_fix.sql запрещает добавлять себя самому).
+            alert('Регистрация прошла успешно! Если подтверждение почты включено — проверьте письмо. Доступ к проекту откроет руководитель.');
             toggleAuthMode();
         }
 
@@ -2639,15 +2607,6 @@
             currentUserProfile = profile;
             currentUserRole = profile.role;
 
-            // Применяем выбор проекта, сделанный при регистрации, если тогда сессии ещё не было
-            // (например, было включено подтверждение почты)
-            const pendingKey = 'wc_pending_project_' + user.id;
-            const pendingProjectId = localStorage.getItem(pendingKey);
-            if (pendingProjectId) {
-                await sb.from('project_members').insert({ user_id: user.id, project_id: pendingProjectId });
-                localStorage.removeItem(pendingKey);
-            }
-
             document.getElementById('authCheckingScreen').classList.add('hidden');
             document.getElementById('loginScreen').classList.add('hidden');
             document.getElementById('appRoot').classList.remove('hidden');
@@ -2862,7 +2821,7 @@
                 const bgStyle = p.coverImage ? `background-image:url('${p.coverImage}');background-size:cover;background-position:center;` : `background:${boardGradientFor(p.id)};`;
                 card.innerHTML = `
                     <button class="w-full h-24 sm:h-28 rounded-xl overflow-hidden shadow-sm border border-slate-200 group-hover:shadow-md transition-shadow block" style="${bgStyle}"></button>
-                    <span class="block mt-2 ml-1 text-base font-bold text-slate-900 leading-snug">${p.name}</span>
+                    <span class="block mt-2 ml-1 text-base font-bold text-slate-900 leading-snug">${escapeHtml(p.name)}</span>
                     <div class="ml-1 mt-0.5" data-project-revision="${p.id}"></div>
                 `;
                 card.querySelector('button').onclick = () => openProject(p.id);
